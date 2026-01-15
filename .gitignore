@@ -1,0 +1,21 @@
+﻿
+# Project Snapshot outputs (generated)
+logs/project_snapshots/
+logs/project_snapshots/*.zip
+node_modules/
+ui-web/node_modules/
+api/__pycache__/
+**/__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example
+keys/
+**/keys/
+*.pem
+*.key
+*.pfx
+dist/
+build/
+.coverage/
+.vscode/settings.json

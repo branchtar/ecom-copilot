@@ -1,0 +1,8 @@
+{
+  "supplier": "ENSOUL",
+  "handling_fee": 0.00,
+  "dropship_fee": 0.00,
+  "misc_fee": 0.00,
+  "min_gross_margin_pct": 22.0,
+  "max_gross_margin_pct": 0.0
+}

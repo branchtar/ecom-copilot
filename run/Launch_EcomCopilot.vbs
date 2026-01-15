@@ -1,0 +1,2 @@
+Set WshShell = CreateObject("WScript.Shell")
+WshShell.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ""C:\Users\Kylem\OneDrive - Copy and Paste LLC\Bwaaack\Ecom Copilot\run\Launch_EcomCopilot.ps1""", 0, False

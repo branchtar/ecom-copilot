@@ -1,0 +1,45 @@
+﻿{
+    "amazon":  {
+                   "bwaaack":  {
+                                   "env_path":  "C:\\Users\\Kylem\\OneDrive - Copy and Paste LLC\\Bwaaack\\Marketplaces\\Amazon Bwaaack\\Amazon API\\keys\\.env"
+                               }
+               },
+    "walmart":  {
+                    "bwaaack":  {
+                                    "env_path":  "C:\\Users\\Kylem\\OneDrive - Copy and Paste LLC\\Bwaaack\\Marketplaces\\Walmart\\Walmart API\\keys\\.env"
+                                }
+                },
+    "shopify":  {
+                    "refreshed":  {
+                                      "env_path":  "C:\\Users\\Kylem\\OneDrive - Copy and Paste LLC\\Copy and Paste LLC\\Brands\\Refreshed Shoe Cleaner\\Marketplaces\\Shopify\\Shopify API\\keys\\.env"
+                                  },
+                    "ethnic":  {
+                                   "env_path":  "C:\\Users\\Kylem\\OneDrive - Copy and Paste LLC\\Bwaaack\\Marketplaces\\Shopify\\Shopify API\\keys\\.env"
+                               }
+                },
+    "reverb":  {
+                   "bwaaack":  {
+                                   "env_path":  ""
+                               }
+               },
+    "ebay":  {
+                 "bwaaack":  {
+                                 "env_path":  ""
+                             }
+             },
+    "usps":  {
+                 "default":  {
+                                 "env_path":  "C:\\Users\\Kylem\\OneDrive - Copy and Paste LLC\\Bwaaack\\Shipping Carriers\\USPS\\USPS API\\keys\\.env"
+                             }
+             },
+    "ups":  {
+                "default":  {
+                                "env_path":  "C:\\Users\\Kylem\\OneDrive - Copy and Paste LLC\\Bwaaack\\Shipping Carriers\\UPS\\UPS API\\keys\\.env"
+                            }
+            },
+    "fedex":  {
+                  "default":  {
+                                  "env_path":  "C:\\Users\\Kylem\\OneDrive - Copy and Paste LLC\\Bwaaack\\Shipping Carriers\\FedEx\\FedEx API\\keys\\.env"
+                              }
+              }
+}

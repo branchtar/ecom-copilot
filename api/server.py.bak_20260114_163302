@@ -1,0 +1,147 @@
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+import json
+from pathlib import Path
+from pricing_engine import compute_pricing
+
+app = FastAPI()
+
+
+
+
+# === EC_PRICING_START ===
+# Pricing feature: config + preview endpoints
+# (Safe block; can be expanded later with real marketplace fee lookups)
+
+CONFIG_PATH = Path(__file__).parent / "pricing_config.json"
+
+def load_pricing_config() -> dict:
+    try:
+        if CONFIG_PATH.exists():
+            return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+def save_pricing_config(cfg: dict) -> None:
+    CONFIG_PATH.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+
+@app.get("/pricing/config")
+def pricing_get_config():
+    return load_pricing_config()
+
+@app.post("/pricing/config")
+def pricing_set_config(cfg: dict):
+    save_pricing_config(cfg)
+    return {"ok": True}
+
+@app.post("/pricing/preview")
+def pricing_preview(payload: dict):
+    cfg = load_pricing_config()
+    return compute_pricing(payload, cfg)
+
+# === EC_PRICING_END ===
+# === EC_DASHBOARD_START ===
+# Minimal dashboard endpoints so the UI stops showing "Could not reach API".
+# Expand these later with real data sources.
+
+@app.get("/health")
+def health():
+    return {"ok": True}
+
+@app.get("/dashboard/kpis")
+def dashboard_kpis():
+    return {
+        "total_sales_7d": 0,
+        "orders_7d": 0,
+        "returns_7d": 0,
+        "items_sold_7d": 0
+    }
+
+@app.get("/dashboard/marketplace-balances")
+def dashboard_marketplace_balances():
+    # UI can render "No balances loaded yet."
+    return []
+
+@app.get("/dashboard/recent-orders")
+def dashboard_recent_orders():
+    # UI can render "No orders loaded yet."
+    return []
+
+@app.get("/dashboard/stock-alerts")
+def dashboard_stock_alerts():
+    # UI can render "No low stock alerts yet."
+    return []
+# === EC_DASHBOARD_END ===
+
+
+
+
+
+# Allow the React dev server
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# --- Demo endpoints used by SuppliersPage ---
+@app.get("/api/suppliers")
+def list_suppliers():
+    return [
+        {"id": "KMC", "key": "KMC", "name": "KMC Music", "location": "USA"},
+        {"id": "ENSOUL", "key": "ENSOUL", "name": "Ensoul Music", "location": "USA"},
+        {"id": "CHESBRO", "key": "CHESBRO", "name": "Chesbro Music", "location": "USA"},
+    ]
+
+@app.get("/api/suppliers/{supplier_id}")
+def supplier_detail(supplier_id: str):
+    return {
+        "id": supplier_id,
+        "key": supplier_id,
+        "name": supplier_id,
+        "location": "USA",
+        "notes": "Demo detail endpoint",
+    }
+
+# Optional: pricing preview endpoints SuppliersPage probes
+@app.get("/api/suppliers/{supplier_id}/pricing_preview")
+def pricing_preview_supplier(supplier_id: str):
+    return {"rows": []}
+
+@app.get("/api/kmc/pricing_preview")
+def pricing_preview_kmc():
+    return {"rows": []}
+
+@app.get("/api/pricing/kmc_preview")
+def pricing_preview_kmc_alt():
+    return {"rows": []}
+
+# -------------------------------------------------------------------
+# UI compatibility endpoints (React dashboard expects these)
+# -------------------------------------------------------------------
+
+@app.get("/health")
+def health():
+    return {"ok": True}
+
+@app.get("/dashboard/kpis")
+def dashboard_kpis():
+    # Placeholder metrics until real data wiring is implemented
+    return {
+        "totalSales7d": 0,
+        "orders7d": 0,
+        "returns7d": 0,
+        "itemsSold7d": 0
+    }
+
+@app.get("/dashboard/orders_recent")
+def dashboard_orders_recent():
+    return []
+
+@app.get("/dashboard/stock_alerts")
+def dashboard_stock_alerts():
+    return []

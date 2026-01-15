@@ -1,0 +1,1790 @@
+# Ecom Copilot - KMC Pricing Scaffolding
+# This overwrites:
+#   py\ecom_copilot_api.py
+#   ui-web\src\App.tsx
+# and adds a KMC pricing preview endpoint + Pricing (KMC) page.
+
+$ErrorActionPreference = "Stop"
+
+$root   = "C:\Users\Kylem\OneDrive - Copy and Paste LLC\Bwaaack\Ecom Copilot"
+$pyDir  = Join-Path $root "py"
+$webDir = Join-Path $root "ui-web"
+
+$apiPy  = Join-Path $pyDir  "ecom_copilot_api.py"
+$appTsx = Join-Path $webDir "src\App.tsx"
+
+Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host "  Ecom Copilot - KMC Pricing Scaffolding  " -ForegroundColor Cyan
+Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "Root : $root"
+Write-Host ""
+
+if (-not (Test-Path -LiteralPath $pyDir)) {
+    throw "Python folder not found: $pyDir"
+}
+if (-not (Test-Path -LiteralPath $webDir)) {
+    throw "Web UI folder not found: $webDir (ui-web must already exist)"
+}
+
+# -------------------- Python API (with KMC pricing) --------------------------
+$apiContent = @'
+"""
+Ecom Copilot - Local API
+Dashboard + Suppliers + KMC pricing backbone for the web UI.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import List, Optional
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+import json
+
+
+# ---------------------------------------------------------
+# Paths & helpers
+# ---------------------------------------------------------
+
+ROOT = Path(__file__).resolve().parents[1]
+DATA_DIR = ROOT / "data"
+SUPPLIERS_FILE = DATA_DIR / "suppliers.json"
+
+DATA_DIR.mkdir(exist_ok=True)
+
+
+def _load_suppliers() -> List[dict]:
+    if not SUPPLIERS_FILE.exists():
+        return []
+    try:
+        with SUPPLIERS_FILE.open("r", encoding="utf-8") as f:
+            payload = json.load(f)
+        suppliers = payload.get("suppliers", [])
+        if not isinstance(suppliers, list):
+            return []
+        return suppliers
+    except Exception:
+        return []
+
+
+def _save_suppliers(suppliers: List[dict]) -> None:
+    SUPPLIERS_FILE.write_text(
+        json.dumps({"suppliers": suppliers}, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _next_id(suppliers: List[dict]) -> int:
+    existing = [s.get("id", 0) for s in suppliers if isinstance(s.get("id", 0), int)]
+    return (max(existing) if existing else 0) + 1
+
+
+def _get_supplier_by_code(code: str) -> Optional[dict]:
+    suppliers = _load_suppliers()
+    for s in suppliers:
+        if str(s.get("code", "")).lower() == code.lower():
+            return s
+    return None
+
+
+# ---------------------------------------------------------
+# Pydantic models
+# ---------------------------------------------------------
+
+
+class Supplier(BaseModel):
+    code: str
+    name: str
+
+    contact_name: Optional[str] = None
+    contact_email: Optional[str] = None
+    contact_phone: Optional[str] = None
+
+    return_address1: Optional[str] = None
+    return_address2: Optional[str] = None
+    return_city: Optional[str] = None
+    return_state: Optional[str] = None
+    return_postal_code: Optional[str] = None
+    return_country: Optional[str] = "US"
+
+    handling_time_days: Optional[int] = 2
+
+    min_gross_margin: Optional[float] = 0.25  # 25%
+    max_gross_margin: Optional[float] = 0.50  # 50%
+
+    # For future pricing/feed wiring
+    products: Optional[int] = 0
+    last_import: Optional[str] = None
+    primary_marketplaces: Optional[List[str]] = []
+    active: bool = True
+
+    # Placeholders for CSV + mapping
+    feed_filename: Optional[str] = None
+    feed_mapping: Optional[dict] = None
+
+    id: Optional[int] = None  # assigned server-side
+
+
+class SupplierSummary(BaseModel):
+    id: int
+    name: str
+    code: str
+    products: int
+    last_import: Optional[str]
+    primary_marketplaces: List[str]
+    active: bool
+
+
+class ApiStatusItem(BaseModel):
+    service: str
+    status: str
+    detail: Optional[str] = None
+
+
+class KmcPricingItem(BaseModel):
+    sku: str
+    product: str
+    brand: str
+    supplier_code: str
+    cost: float
+    msrp: Optional[float] = None
+    margin_used: float
+    price_amazon: float
+    price_shopify: float
+    price_walmart: float
+
+
+# ---------------------------------------------------------
+# FastAPI app
+# ---------------------------------------------------------
+
+app = FastAPI(
+    title="Ecom Copilot API",
+    version="0.1.0",
+    description="Local API backend for the Ecom Copilot dashboard.",
+)
+
+origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3001",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ---------------------------------------------------------
+# Basic endpoints
+# ---------------------------------------------------------
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "root": str(ROOT)}
+
+
+@app.get("/dashboard/kpis")
+def dashboard_kpis():
+    return {
+        "total_sales_7d": 17542.73,
+        "orders_7d": 167,
+        "returns_7d": 12,
+        "items_sold_7d": 212,
+    }
+
+
+@app.get("/dashboard/marketplace-balances")
+def dashboard_marketplace_balances():
+    return [
+        {
+            "marketplace": "Amazon",
+            "balance": 1872.45,
+            "next_payout": "2024-04-30",
+        },
+        {
+            "marketplace": "Walmart",
+            "balance": 948.25,
+            "next_payout": "2024-04-27",
+        },
+        {
+            "marketplace": "Shopify",
+            "balance": 527.90,
+            "next_payout": "2024-05-02",
+        },
+        {
+            "marketplace": "Reverb",
+            "balance": 316.75,
+            "next_payout": "2024-04-25",
+        },
+    ]
+
+
+@app.get("/dashboard/recent-orders")
+def dashboard_recent_orders():
+    return [
+        {
+            "order_id": "#1332",
+            "customer": "Kyle Mulvey",
+            "status": "Shipped",
+            "date": "2024-04-24",
+            "total": 42.60,
+        },
+        {
+            "order_id": "#1381",
+            "customer": "Jane Smith",
+            "status": "Pending",
+            "date": "2024-04-24",
+            "total": 19.95,
+        },
+        {
+            "order_id": "#1360",
+            "customer": "Mike Johnson",
+            "status": "Shipped",
+            "date": "2024-04-23",
+            "total": 87.90,
+        },
+        {
+            "order_id": "#1379",
+            "customer": "Emma Davis",
+            "status": "Cancelled",
+            "date": "2024-04-23",
+            "total": 15.45,
+        },
+    ]
+
+
+@app.get("/dashboard/stock-alerts")
+def dashboard_stock_alerts():
+    return [
+        {
+            "sku": "KMC-ABC123",
+            "product": "Drumstick S4 Hickory",
+            "stock": 3,
+            "supplier": "KMC Music",
+        },
+        {
+            "sku": "ENS-789",
+            "product": "Guitar Tuner Clip-On",
+            "stock": 5,
+            "supplier": "Ensoul Music",
+        },
+        {
+            "sku": "LPD-456",
+            "product": "Harmonica Key of C",
+            "stock": 7,
+            "supplier": "LPD Music",
+        },
+    ]
+
+
+@app.get("/settings/api-status", response_model=List[ApiStatusItem])
+def settings_api_status():
+    return [
+        {"service": "Amazon SP-API", "status": "warning", "detail": "Diagnostics not wired yet"},
+        {"service": "Amazon Advertising", "status": "not_configured", "detail": "API keys not set"},
+        {"service": "Shopify Admin API", "status": "connected", "detail": "Local dev store"},
+        {"service": "Walmart Seller API", "status": "not_configured", "detail": None},
+        {"service": "Reverb API", "status": "not_configured", "detail": None},
+    ]
+
+
+# ---------------------------------------------------------
+# Suppliers endpoints
+# ---------------------------------------------------------
+
+
+@app.get("/suppliers/summary", response_model=List[SupplierSummary])
+def suppliers_summary():
+    suppliers = _load_suppliers()
+
+    if not suppliers:
+        suppliers = [
+            {
+                "id": 1,
+                "code": "KMC",
+                "name": "KMC Music",
+                "products": 1243,
+                "last_import": "2024-04-25",
+                "primary_marketplaces": ["Amazon Bwaaack", "Reverb"],
+                "active": True,
+                "handling_time_days": 2,
+                "min_gross_margin": 0.25,
+                "max_gross_margin": 0.50,
+            },
+            {
+                "id": 2,
+                "code": "ENSOUL",
+                "name": "Ensoul Music",
+                "products": 842,
+                "last_import": "2024-04-24",
+                "primary_marketplaces": ["Amazon Bwaaack", "Shopify Ethnic"],
+                "active": True,
+                "handling_time_days": 2,
+                "min_gross_margin": 0.25,
+                "max_gross_margin": 0.50,
+            },
+            {
+                "id": 3,
+                "code": "LPD",
+                "name": "LPD Music",
+                "products": 412,
+                "last_import": "2024-04-10",
+                "primary_marketplaces": ["Amazon Bwaaack"],
+                "active": False,
+                "handling_time_days": 3,
+                "min_gross_margin": 0.20,
+                "max_gross_margin": 0.45,
+            },
+        ]
+        _save_suppliers(suppliers)
+
+    summaries: List[SupplierSummary] = []
+    for s in suppliers:
+        summaries.append(
+            SupplierSummary(
+                id=int(s.get("id", 0) or 0),
+                name=str(s.get("name", "")),
+                code=str(s.get("code", "")),
+                products=int(s.get("products", 0) or 0),
+                last_import=s.get("last_import"),
+                primary_marketplaces=list(s.get("primary_marketplaces") or []),
+                active=bool(s.get("active", True)),
+            )
+        )
+    return summaries
+
+
+@app.get("/suppliers/{code}", response_model=Supplier)
+def get_supplier(code: str):
+    suppliers = _load_suppliers()
+    for s in suppliers:
+        if s.get("code", "").lower() == code.lower():
+            return Supplier(**s)
+    raise HTTPException(status_code=404, detail="Supplier not found")
+
+
+@app.post("/suppliers", response_model=Supplier)
+def upsert_supplier(supplier: Supplier):
+    suppliers = _load_suppliers()
+
+    if supplier.id is None:
+        supplier.id = _next_id(suppliers)
+
+    replaced = False
+    new_list = []
+    for s in suppliers:
+        if s.get("code", "").lower() == supplier.code.lower():
+            new_list.append(supplier.dict())
+            replaced = True
+        else:
+            new_list.append(s)
+
+    if not replaced:
+        new_list.append(supplier.dict())
+
+    _save_suppliers(new_list)
+    return supplier
+
+
+# ---------------------------------------------------------
+# KMC Pricing preview endpoint
+# ---------------------------------------------------------
+
+KMC_FEED = [
+    {
+        "sku": "KMC-DRUM-S4",
+        "product": "Drumstick S4 Hickory",
+        "brand": "KMC",
+        "cost": 4.20,
+        "msrp": 9.99,
+    },
+    {
+        "sku": "KMC-GTR-STRINGS-10",
+        "product": "Electric Guitar Strings 10-46",
+        "brand": "KMC",
+        "cost": 3.10,
+        "msrp": 7.99,
+    },
+    {
+        "sku": "KMC-KB-STAND",
+        "product": "Keyboard Stand Double Braced",
+        "brand": "KMC",
+        "cost": 24.00,
+        "msrp": 59.99,
+    },
+    {
+        "sku": "KMC-MIC-CABLE-25",
+        "product": "Mic Cable XLR 25ft",
+        "brand": "KMC",
+        "cost": 7.50,
+        "msrp": 19.99,
+    },
+]
+
+
+def _price_from_margin(cost: float, margin: float) -> float:
+    """
+    margin = (price - cost) / price
+    price = cost / (1 - margin)
+    """
+    margin = max(0.0, min(margin, 0.95))
+    if margin >= 0.95:
+        margin = 0.95
+    if margin <= 0.0:
+        return round(cost, 2)
+    price = cost / (1.0 - margin)
+    return round(price, 2)
+
+
+@app.get("/pricing/kmc/preview", response_model=List[KmcPricingItem])
+def pricing_kmc_preview():
+    """
+    Simple KMC pricing preview:
+    - Uses KMC supplier's min_gross_margin if defined, else 0.25
+    - Applies a small tweak per marketplace just to show differences.
+    """
+    supplier = _get_supplier_by_code("KMC")
+    base_margin = 0.25
+    if supplier is not None:
+        try:
+            mgm = supplier.get("min_gross_margin")
+            if isinstance(mgm, (int, float)):
+                base_margin = float(mgm)
+        except Exception:
+            pass
+
+    items: List[KmcPricingItem] = []
+    for row in KMC_FEED:
+        cost = float(row["cost"])
+        msrp = float(row.get("msrp") or 0.0) or None
+
+        # simple per-channel tweaks
+        margin_amz = base_margin
+        margin_shp = base_margin + 0.03
+        margin_wmt = base_margin + 0.01
+
+        price_amz = _price_from_margin(cost, margin_amz)
+        price_shp = _price_from_margin(cost, margin_shp)
+        price_wmt = _price_from_margin(cost, margin_wmt)
+
+        items.append(
+            KmcPricingItem(
+                sku=row["sku"],
+                product=row["product"],
+                brand=row["brand"],
+                supplier_code="KMC",
+                cost=cost,
+                msrp=msrp,
+                margin_used=base_margin,
+                price_amazon=price_amz,
+                price_shopify=price_shp,
+                price_walmart=price_wmt,
+            )
+        )
+    return items
+
+
+# ---------------------------------------------------------
+# Uvicorn entrypoint
+# ---------------------------------------------------------
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(
+        "ecom_copilot_api:app",
+        host="127.0.0.1",
+        port=8001,
+        reload=True,
+    )
+'@
+
+Set-Content -LiteralPath $apiPy -Value $apiContent -Encoding UTF8
+Write-Host ("Updated API: {0}" -f $apiPy)
+
+
+
+# -------------------- React App.tsx (with Pricing page) ----------------------
+$appContent = @'
+import React, { useEffect, useState } from "react";
+
+const API_BASE = "http://127.0.0.1:8001";
+
+type Kpis = {
+  total_sales_7d?: number;
+  orders_7d?: number;
+  returns_7d?: number;
+  items_sold_7d?: number;
+};
+
+type MarketplaceBalance = {
+  marketplace: string;
+  balance: number;
+  next_payout: string;
+};
+
+type RecentOrder = {
+  order_id: string;
+  customer: string;
+  status: string;
+  date: string;
+  total: number;
+};
+
+type StockAlert = {
+  sku: string;
+  product: string;
+  stock: number;
+  supplier: string;
+};
+
+type SupplierSummary = {
+  id: number;
+  name: string;
+  code: string;
+  products: number;
+  last_import?: string;
+  primary_marketplaces: string[];
+  active: boolean;
+};
+
+type SupplierDetail = {
+  id?: number;
+  code: string;
+  name: string;
+  contact_name?: string;
+  contact_email?: string;
+  contact_phone?: string;
+  return_address1?: string;
+  return_address2?: string;
+  return_city?: string;
+  return_state?: string;
+  return_postal_code?: string;
+  return_country?: string;
+  handling_time_days?: number;
+  min_gross_margin?: number;
+  max_gross_margin?: number;
+};
+
+type ApiStatus = {
+  service: string;
+  status: string;
+  detail?: string | null;
+};
+
+type KmcPricingItem = {
+  sku: string;
+  product: string;
+  brand: string;
+  supplier_code: string;
+  cost: number;
+  msrp?: number | null;
+  margin_used: number;
+  price_amazon: number;
+  price_shopify: number;
+  price_walmart: number;
+};
+
+type NavKey =
+  | "dashboard"
+  | "suppliers"
+  | "pricing"
+  | "emails"
+  | "marketplaces"
+  | "settings"
+  | "api";
+
+const formatMoney = (val?: number) =>
+  typeof val === "number"
+    ? `$${val.toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })}`
+    : "—";
+
+const formatPercent = (val?: number) =>
+  typeof val === "number"
+    ? `${(val * 100).toFixed(1)}%`
+    : "—";
+
+
+// --------------------------------------------------------
+// Dashboard Page
+// --------------------------------------------------------
+
+const DashboardPage: React.FC = () => {
+  const [kpis, setKpis] = useState<Kpis | null>(null);
+  const [balances, setBalances] = useState<MarketplaceBalance[]>([]);
+  const [recentOrders, setRecentOrders] = useState<RecentOrder[]>([]);
+  const [stockAlerts, setStockAlerts] = useState<StockAlert[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchAll = async () => {
+      try {
+        const [kpisRes, balancesRes, ordersRes, stockRes] = await Promise.all([
+          fetch(`${API_BASE}/dashboard/kpis`),
+          fetch(`${API_BASE}/dashboard/marketplace-balances`),
+          fetch(`${API_BASE}/dashboard/recent-orders`),
+          fetch(`${API_BASE}/dashboard/stock-alerts`),
+        ]);
+
+        if (!kpisRes.ok) throw new Error("Failed to load KPIs");
+        if (!balancesRes.ok) throw new Error("Failed to load balances");
+        if (!ordersRes.ok) throw new Error("Failed to load orders");
+        if (!stockRes.ok) throw new Error("Failed to load stock alerts");
+
+        const kpisJson = await kpisRes.json();
+        const balancesJson = await balancesRes.json();
+        const ordersJson = await ordersRes.json();
+        const stockJson = await stockRes.json();
+
+        setKpis(kpisJson);
+        setBalances(Array.isArray(balancesJson) ? balancesJson : []);
+        setRecentOrders(Array.isArray(ordersJson) ? ordersJson : []);
+        setStockAlerts(Array.isArray(stockJson) ? stockJson : []);
+        setError(null);
+      } catch (err: any) {
+        console.error(err);
+        setError("Could not reach Ecom Copilot API at " + API_BASE);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchAll();
+  }, []);
+
+  return (
+    <div className="flex-1 flex flex-col">
+      {error && (
+        <div className="rounded-md bg-rose-50 border border-rose-200 px-4 py-2 text-sm text-rose-700 mb-4">
+          {error}
+        </div>
+      )}
+
+      {/* KPI row */}
+      <section className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+        <div className="bg-white rounded-xl shadow-sm px-4 py-3 flex flex-col justify-between">
+          <div className="text-xs text-slate-500 mb-1">Total Sales (7d)</div>
+          <div className="text-2xl font-semibold mb-1">
+            {formatMoney(kpis?.total_sales_7d)}
+          </div>
+          <div className="text-[11px] text-slate-500">All marketplaces</div>
+        </div>
+        <div className="bg-white rounded-xl shadow-sm px-4 py-3">
+          <div className="text-xs text-slate-500 mb-1">Orders (7d)</div>
+          <div className="text-2xl font-semibold mb-1">
+            {kpis?.orders_7d ?? "—"}
+          </div>
+          <div className="text-[11px] text-emerald-600">Live from API</div>
+        </div>
+        <div className="bg-white rounded-xl shadow-sm px-4 py-3">
+          <div className="text-xs text-slate-500 mb-1">Returns (7d)</div>
+          <div className="text-2xl font-semibold mb-1">
+            {kpis?.returns_7d ?? "—"}
+          </div>
+          <div className="text-[11px] text-rose-600">Processed returns</div>
+        </div>
+        <div className="bg-white rounded-xl shadow-sm px-4 py-3">
+          <div className="text-xs text-slate-500 mb-1">Items Sold (7d)</div>
+          <div className="text-2xl font-semibold mb-1">
+            {kpis?.items_sold_7d ?? "—"}
+          </div>
+          <div className="text-[11px] text-emerald-600">Units shipped</div>
+        </div>
+      </section>
+
+      {/* Sales overview + balances */}
+      <section className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
+        <div className="bg-white rounded-xl shadow-sm p-4 lg:col-span-2 flex flex-col">
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-sm font-semibold">Sales Overview</div>
+            <div className="text-xs text-slate-500 bg-slate-100 rounded-full px-2 py-0.5">
+              Last 30 days (placeholder)
+            </div>
+          </div>
+          <div className="flex-1 flex items-center justify-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-lg">
+            Chart wiring comes later — for now this just proves the API → UI
+            pipeline.
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl shadow-sm p-4 space-y-3">
+          <div className="flex items-center justify-between mb-1">
+            <div className="text-sm font-semibold">Marketplace Balances</div>
+            <div className="text-xs text-slate-500">View All</div>
+          </div>
+          <div className="grid grid-cols-1 gap-2">
+            {balances.map((b) => (
+              <div
+                key={b.marketplace}
+                className="rounded-lg px-3 py-2 text-xs text-white"
+                style={{
+                  background: b.marketplace.toLowerCase().includes("amazon")
+                    ? "linear-gradient(135deg,#f97316,#ea580c)"
+                    : b.marketplace.toLowerCase().includes("walmart")
+                    ? "linear-gradient(135deg,#0ea5e9,#0284c7)"
+                    : b.marketplace.toLowerCase().includes("shopify")
+                    ? "linear-gradient(135deg,#22c55e,#16a34a)"
+                    : "linear-gradient(135deg,#6366f1,#4f46e5)",
+                }}
+              >
+                <div className="font-semibold">{b.marketplace}</div>
+                <div className="text-lg font-bold">
+                  {formatMoney(b.balance)}
+                </div>
+                <div className="text-[10px] text-slate-100/80">
+                  Paid on {b.next_payout}
+                </div>
+              </div>
+            ))}
+            {balances.length === 0 && (
+              <div className="text-xs text-slate-500">
+                No balances loaded yet.
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* Recent orders + stock alerts */}
+      <section className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+        <div className="bg-white rounded-xl shadow-sm p-4">
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-sm font-semibold">Recent Orders</div>
+            <div className="text-xs text-brand-600 cursor-default">View All</div>
+          </div>
+          <div className="border border-slate-200 rounded-lg overflow-hidden text-xs">
+            <table className="min-w-full">
+              <thead className="bg-slate-50">
+                <tr>
+                  <th className="px-2 py-1 text-left font-medium text-slate-500">
+                    #
+                  </th>
+                  <th className="px-2 py-1 text-left font-medium text-slate-500">
+                    Customer
+                  </th>
+                  <th className="px-2 py-1 text-left font-medium text-slate-500">
+                    Status
+                  </th>
+                  <th className="px-2 py-1 text-left font-medium text-slate-500">
+                    Date
+                  </th>
+                  <th className="px-2 py-1 text-right font-medium text-slate-500">
+                    Total
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentOrders.map((o) => (
+                  <tr key={o.order_id} className="border-t border-slate-100">
+                    <td className="px-2 py-1 text-slate-600">{o.order_id}</td>
+                    <td className="px-2 py-1 text-slate-700">{o.customer}</td>
+                    <td className="px-2 py-1">
+                      <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium bg-slate-100 text-slate-700">
+                        {o.status}
+                      </span>
+                    </td>
+                    <td className="px-2 py-1 text-slate-600">{o.date}</td>
+                    <td className="px-2 py-1 text-right text-slate-700">
+                      {formatMoney(o.total)}
+                    </td>
+                  </tr>
+                ))}
+                {recentOrders.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      className="px-2 py-3 text-center text-slate-400"
+                    >
+                      No orders loaded yet.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl shadow-sm p-4">
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-sm font-semibold">Stock Alerts</div>
+            <div className="text-xs text-brand-600 cursor-default">View All</div>
+          </div>
+          <div className="border border-slate-200 rounded-lg overflow-hidden text-xs">
+            <table className="min-w-full">
+              <thead className="bg-slate-50">
+                <tr>
+                  <th className="px-2 py-1 text-left font-medium text-slate-500">
+                    SKU
+                  </th>
+                  <th className="px-2 py-1 text-left font-medium text-slate-500">
+                    Product
+                  </th>
+                  <th className="px-2 py-1 text-right font-medium text-slate-500">
+                    Stock
+                  </th>
+                  <th className="px-2 py-1 text-left font-medium text-slate-500">
+                    Supplier
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {stockAlerts.map((a) => (
+                  <tr key={a.sku} className="border-t border-slate-100">
+                    <td className="px-2 py-1 text-slate-700">{a.sku}</td>
+                    <td className="px-2 py-1 text-slate-700 truncate max-w-xs">
+                      {a.product}
+                    </td>
+                    <td className="px-2 py-1 text-right text-slate-700">
+                      {a.stock}
+                    </td>
+                    <td className="px-2 py-1 text-slate-700">{a.supplier}</td>
+                  </tr>
+                ))}
+                {stockAlerts.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={4}
+                      className="px-2 py-3 text-center text-slate-400"
+                    >
+                      No low stock alerts yet.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      {loading && (
+        <div className="text-xs text-slate-500">
+          Loading dashboard data from API...
+        </div>
+      )}
+    </div>
+  );
+};
+
+
+// --------------------------------------------------------
+// Suppliers Page (with Add Supplier form)
+// --------------------------------------------------------
+
+const SuppliersPage: React.FC = () => {
+  const [rows, setRows] = useState<SupplierSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [mode, setMode] = useState<"list" | "edit">("list");
+  const [form, setForm] = useState<SupplierDetail>({
+    code: "",
+    name: "",
+    return_country: "US",
+    handling_time_days: 2,
+    min_gross_margin: 0.25,
+    max_gross_margin: 0.5,
+  });
+
+  const loadSuppliers = async () => {
+    try {
+      setLoading(true);
+      const res = await fetch(`${API_BASE}/suppliers/summary`);
+      if (!res.ok) throw new Error("Failed to load suppliers");
+      const json = await res.json();
+      setRows(Array.isArray(json) ? json : []);
+      setError(null);
+    } catch (err: any) {
+      console.error(err);
+      setError("Could not load suppliers from API.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadSuppliers();
+  }, []);
+
+  const startAddSupplier = () => {
+    setForm({
+      code: "",
+      name: "",
+      contact_name: "",
+      contact_email: "",
+      contact_phone: "",
+      return_address1: "",
+      return_address2: "",
+      return_city: "",
+      return_state: "",
+      return_postal_code: "",
+      return_country: "US",
+      handling_time_days: 2,
+      min_gross_margin: 0.25,
+      max_gross_margin: 0.5,
+    });
+    setMode("edit");
+  };
+
+  const handleFormChange = (
+    e: React.ChangeEvent<
+      HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
+    >
+  ) => {
+    const { name, value } = e.target;
+    setForm((prev) => ({
+      ...prev,
+      [name]:
+        name === "handling_time_days" ||
+        name === "min_gross_margin" ||
+        name === "max_gross_margin"
+          ? value === ""
+            ? undefined
+            : Number(value)
+          : value,
+    }));
+  };
+
+  const saveSupplier = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/suppliers`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      if (!res.ok) throw new Error("Failed to save supplier");
+      await res.json();
+      await loadSuppliers();
+      setMode("list");
+    } catch (err: any) {
+      console.error(err);
+      setError("Could not save supplier.");
+    }
+  };
+
+  if (mode === "edit") {
+    return (
+      <div className="flex-1 flex flex-col">
+        <section className="mb-4">
+          <div className="text-xs text-slate-500 uppercase tracking-wide mb-1">
+            Add Supplier
+          </div>
+          <div className="text-sm text-slate-500">
+            Define supplier info, margins, and feed settings. This will drive
+            pricing and inventory rules later.
+          </div>
+        </section>
+
+        <section className="bg-white rounded-xl shadow-sm p-4 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                Supplier Name
+              </label>
+              <input
+                name="name"
+                value={form.name}
+                onChange={handleFormChange}
+                className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+                placeholder="KMC Music"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                Code
+              </label>
+              <input
+                name="code"
+                value={form.code}
+                onChange={handleFormChange}
+                className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+                placeholder="KMC"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                Contact Name
+              </label>
+              <input
+                name="contact_name"
+                value={form.contact_name || ""}
+                onChange={handleFormChange}
+                className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+                placeholder="Rep name"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                Contact Email
+              </label>
+              <input
+                name="contact_email"
+                value={form.contact_email || ""}
+                onChange={handleFormChange}
+                className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+                placeholder="rep@kmcmusic.com"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                Contact Phone
+              </label>
+              <input
+                name="contact_phone"
+                value={form.contact_phone || ""}
+                onChange={handleFormChange}
+                className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+                placeholder="(555) 123-4567"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                Handling Time (days)
+              </label>
+              <input
+                type="number"
+                name="handling_time_days"
+                value={form.handling_time_days ?? ""}
+                onChange={handleFormChange}
+                className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+                min={0}
+              />
+            </div>
+          </div>
+
+          <hr className="border-slate-200" />
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="md:col-span-2">
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                Return Address
+              </label>
+              <input
+                name="return_address1"
+                value={form.return_address1 || ""}
+                onChange={handleFormChange}
+                className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm mb-2"
+                placeholder="Address line 1"
+              />
+              <input
+                name="return_address2"
+                value={form.return_address2 || ""}
+                onChange={handleFormChange}
+                className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm mb-2"
+                placeholder="Address line 2 (optional)"
+              />
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                <input
+                  name="return_city"
+                  value={form.return_city || ""}
+                  onChange={handleFormChange}
+                  className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+                  placeholder="City"
+                />
+                <input
+                  name="return_state"
+                  value={form.return_state || ""}
+                  onChange={handleFormChange}
+                  className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+                  placeholder="State"
+                />
+                <input
+                  name="return_postal_code"
+                  value={form.return_postal_code || ""}
+                  onChange={handleFormChange}
+                  className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+                  placeholder="ZIP"
+                />
+                <input
+                  name="return_country"
+                  value={form.return_country || ""}
+                  onChange={handleFormChange}
+                  className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+                  placeholder="US"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                Minimum Gross Margin
+              </label>
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  step="0.01"
+                  name="min_gross_margin"
+                  value={form.min_gross_margin ?? ""}
+                  onChange={handleFormChange}
+                  className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+                />
+                <span className="text-xs text-slate-500">
+                  e.g. 0.25 = 25%
+                </span>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                Maximum Gross Margin
+              </label>
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  step="0.01"
+                  name="max_gross_margin"
+                  value={form.max_gross_margin ?? ""}
+                  onChange={handleFormChange}
+                  className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+                />
+                <span className="text-xs text-slate-500">
+                  e.g. 0.55 = 55%
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <hr className="border-slate-200" />
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="md:col-span-2">
+              <div className="text-xs font-medium text-slate-600 mb-1">
+                Product Feed (future step)
+              </div>
+              <p className="text-xs text-slate-500 mb-2">
+                Here we&apos;ll eventually let you upload the supplier CSV (like
+                KMC price list) and map columns (SKU, cost, qty, etc.) to the
+                pricing engine. For now this is just a placeholder so the layout
+                is ready.
+              </p>
+              <button
+                type="button"
+                className="inline-flex items-center rounded-md bg-slate-100 px-3 py-1 text-xs text-slate-600 cursor-not-allowed"
+              >
+                Upload CSV (coming soon)
+              </button>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-4">
+            <button
+              type="button"
+              onClick={() => setMode("list")}
+              className="px-3 py-1.5 rounded-md text-xs bg-slate-100 text-slate-700"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={saveSupplier}
+              className="px-4 py-1.5 rounded-md text-xs bg-brand-600 text-white"
+            >
+              Save Supplier
+            </button>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  // List mode
+  return (
+    <div className="flex-1 flex flex-col">
+      <section className="mb-4">
+        <div className="text-xs text-slate-500 uppercase tracking-wide mb-1">
+          Suppliers
+        </div>
+        <div className="text-sm text-slate-500">
+          Mirror of your SellerChamp-style supplier setup and supplier pricing.
+          This will drive pricing, feeds, and inventory.
+        </div>
+      </section>
+
+      {error && (
+        <div className="rounded-md bg-rose-50 border border-rose-200 px-4 py-2 text-sm text-rose-700 mb-4">
+          {error}
+        </div>
+      )}
+
+      <section className="bg-white rounded-xl shadow-sm p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-sm font-semibold">
+            {rows.length} suppliers • this will eventually drive your pricing &
+            feeds.
+          </div>
+          <button
+            type="button"
+            onClick={startAddSupplier}
+            className="text-xs px-3 py-1 rounded-full bg-brand-600 text-white"
+          >
+            + Add Supplier
+          </button>
+        </div>
+
+        <div className="border border-slate-200 rounded-lg overflow-hidden text-xs">
+          <table className="min-w-full">
+            <thead className="bg-slate-50">
+              <tr>
+                <th className="px-3 py-2 text-left font-medium text-slate-500">
+                  Supplier
+                </th>
+                <th className="px-3 py-2 text-left font-medium text-slate-500">
+                  Code
+                </th>
+                <th className="px-3 py-2 text-right font-medium text-slate-500">
+                  Products
+                </th>
+                <th className="px-3 py-2 text-left font-medium text-slate-500">
+                  Last Import
+                </th>
+                <th className="px-3 py-2 text-left font-medium text-slate-500">
+                  Marketplaces
+                </th>
+                <th className="px-3 py-2 text-left font-medium text-slate-500">
+                  Status
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((s) => (
+                <tr key={s.id} className="border-t border-slate-100">
+                  <td className="px-3 py-2 text-slate-800">{s.name}</td>
+                  <td className="px-3 py-2 text-slate-600">{s.code}</td>
+                  <td className="px-3 py-2 text-right text-slate-800">
+                    {s.products.toLocaleString()}
+                  </td>
+                  <td className="px-3 py-2 text-slate-600">
+                    {s.last_import || "—"}
+                  </td>
+                  <td className="px-3 py-2 text-slate-600">
+                    {s.primary_marketplaces.join(", ")}
+                  </td>
+                  <td className="px-3 py-2">
+                    <span
+                      className={
+                        "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium " +
+                        (s.active
+                          ? "bg-emerald-50 text-emerald-700"
+                          : "bg-slate-100 text-slate-600")
+                      }
+                    >
+                      {s.active ? "Active" : "Paused"}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+              {!loading && rows.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={6}
+                    className="px-3 py-3 text-center text-slate-400"
+                  >
+                    No suppliers loaded yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {loading && (
+          <div className="text-xs text-slate-500 mt-3">
+            Loading supplier summary from API...
+          </div>
+        )}
+      </section>
+    </div>
+  );
+};
+
+
+// --------------------------------------------------------
+// KMC Pricing Page
+// --------------------------------------------------------
+
+const KmcPricingPage: React.FC = () => {
+  const [rows, setRows] = useState<KmcPricingItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        setLoading(true);
+        const res = await fetch(`${API_BASE}/pricing/kmc/preview`);
+        if (!res.ok) throw new Error("Failed to load KMC pricing");
+        const json = await res.json();
+        setRows(Array.isArray(json) ? json : []);
+        setError(null);
+      } catch (err: any) {
+        console.error(err);
+        setError("Could not load KMC pricing preview from API.");
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, []);
+
+  return (
+    <div className="flex-1 flex flex-col">
+      <section className="mb-4">
+        <div className="text-xs text-slate-500 uppercase tracking-wide mb-1">
+          KMC Pricing Preview
+        </div>
+        <div className="text-sm text-slate-500">
+          Uses KMC supplier margins as the base (from Suppliers). This is the
+          first step toward a full pricing engine for KMC and other distributors.
+        </div>
+      </section>
+
+      {error && (
+        <div className="rounded-md bg-rose-50 border border-rose-200 px-4 py-2 text-sm text-rose-700 mb-4">
+          {error}
+        </div>
+      )}
+
+      <section className="bg-white rounded-xl shadow-sm p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-sm font-semibold">
+            Sample KMC SKUs &amp; computed prices
+          </div>
+          <div className="text-xs text-slate-500">
+            Margin source: KMC min gross margin (Suppliers)
+          </div>
+        </div>
+
+        <div className="border border-slate-200 rounded-lg overflow-auto text-xs">
+          <table className="min-w-full">
+            <thead className="bg-slate-50">
+              <tr>
+                <th className="px-2 py-2 text-left font-medium text-slate-500">
+                  SKU
+                </th>
+                <th className="px-2 py-2 text-left font-medium text-slate-500">
+                  Product
+                </th>
+                <th className="px-2 py-2 text-left font-medium text-slate-500">
+                  Brand
+                </th>
+                <th className="px-2 py-2 text-right font-medium text-slate-500">
+                  Cost
+                </th>
+                <th className="px-2 py-2 text-right font-medium text-slate-500">
+                  MSRP
+                </th>
+                <th className="px-2 py-2 text-right font-medium text-slate-500">
+                  Margin Used
+                </th>
+                <th className="px-2 py-2 text-right font-medium text-slate-500">
+                  Amazon Price
+                </th>
+                <th className="px-2 py-2 text-right font-medium text-slate-500">
+                  Shopify Price
+                </th>
+                <th className="px-2 py-2 text-right font-medium text-slate-500">
+                  Walmart Price
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.sku} className="border-t border-slate-100">
+                  <td className="px-2 py-1 text-slate-800">{r.sku}</td>
+                  <td className="px-2 py-1 text-slate-800">{r.product}</td>
+                  <td className="px-2 py-1 text-slate-700">{r.brand}</td>
+                  <td className="px-2 py-1 text-right text-slate-800">
+                    {formatMoney(r.cost)}
+                  </td>
+                  <td className="px-2 py-1 text-right text-slate-800">
+                    {r.msrp ? formatMoney(r.msrp) : "—"}
+                  </td>
+                  <td className="px-2 py-1 text-right text-slate-700">
+                    {formatPercent(r.margin_used)}
+                  </td>
+                  <td className="px-2 py-1 text-right text-slate-800">
+                    {formatMoney(r.price_amazon)}
+                  </td>
+                  <td className="px-2 py-1 text-right text-slate-800">
+                    {formatMoney(r.price_shopify)}
+                  </td>
+                  <td className="px-2 py-1 text-right text-slate-800">
+                    {formatMoney(r.price_walmart)}
+                  </td>
+                </tr>
+              ))}
+              {!loading && rows.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={9}
+                    className="px-2 py-3 text-center text-slate-400"
+                  >
+                    No KMC pricing rows returned yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {loading && (
+          <div className="text-xs text-slate-500 mt-3">
+            Loading KMC pricing preview...
+          </div>
+        )}
+      </section>
+    </div>
+  );
+};
+
+
+// --------------------------------------------------------
+// API Connections Page
+// --------------------------------------------------------
+
+const ApiConnectionsPage: React.FC = () => {
+  const [rows, setRows] = useState<ApiStatus[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        setLoading(true);
+        const res = await fetch(`${API_BASE}/settings/api-status`);
+        if (!res.ok) throw new Error("Failed to load api status");
+        const json = await res.json();
+        setRows(Array.isArray(json) ? json : []);
+        setError(null);
+      } catch (err: any) {
+        console.error(err);
+        setError("Could not load API connection status.");
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, []);
+
+  const badgeClass = (status: string) => {
+    if (status === "connected") return "bg-emerald-50 text-emerald-700";
+    if (status === "warning") return "bg-amber-50 text-amber-700";
+    return "bg-slate-100 text-slate-600";
+  };
+
+  return (
+    <div className="flex-1 flex flex-col">
+      <section className="mb-4">
+        <div className="text-xs text-slate-500 uppercase tracking-wide mb-1">
+          API Connections
+        </div>
+        <div className="text-sm text-slate-500">
+          High-level view of which marketplaces + services are wired into Ecom
+          Copilot.
+        </div>
+      </section>
+
+      {error && (
+        <div className="rounded-md bg-rose-50 border border-rose-200 px-4 py-2 text-sm text-rose-700 mb-4">
+          {error}
+        </div>
+      )}
+
+      <section className="bg-white rounded-xl shadow-sm p-4">
+        <div className="text-sm font-semibold mb-3">
+          Connections for your local build
+        </div>
+        <div className="border border-slate-200 rounded-lg overflow-hidden text-xs">
+          <table className="min-w-full">
+            <thead className="bg-slate-50">
+              <tr>
+                <th className="px-3 py-2 text-left font-medium text-slate-500">
+                  Service
+                </th>
+                <th className="px-3 py-2 text-left font-medium text-slate-500">
+                  Status
+                </th>
+                <th className="px-3 py-2 text-left font-medium text-slate-500">
+                  Detail
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, idx) => (
+                <tr key={idx} className="border-t border-slate-100">
+                  <td className="px-3 py-2 text-slate-800">{r.service}</td>
+                  <td className="px-3 py-2">
+                    <span
+                      className={
+                        "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium " +
+                        badgeClass(r.status)
+                      }
+                    >
+                      {r.status}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-slate-600">
+                    {r.detail || "—"}
+                  </td>
+                </tr>
+              ))}
+              {!loading && rows.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={3}
+                    className="px-3 py-3 text-center text-slate-400"
+                  >
+                    No API connections defined yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {loading && (
+          <div className="text-xs text-slate-500 mt-3">
+            Loading API connection status...
+          </div>
+        )}
+      </section>
+    </div>
+  );
+};
+
+
+// --------------------------------------------------------
+// Placeholder pages for Emails / Marketplaces / Settings
+// --------------------------------------------------------
+
+const PlaceholderPage: React.FC<{ title: string; body: string }> = ({
+  title,
+  body,
+}) => (
+  <div className="flex-1 flex flex-col">
+    <section className="mb-4">
+      <div className="text-xs text-slate-500 uppercase tracking-wide mb-1">
+        {title}
+      </div>
+      <div className="text-sm text-slate-500">{body}</div>
+    </section>
+    <section className="bg-white rounded-xl shadow-sm p-6 text-xs text-slate-500">
+      Wiring for this module will come next. For now this is just a placeholder
+      so the shell matches your future app.
+    </section>
+  </div>
+);
+
+
+// --------------------------------------------------------
+// Root App Layout
+// --------------------------------------------------------
+
+const App: React.FC = () => {
+  const [active, setActive] = useState<NavKey>("dashboard");
+
+  const renderPage = () => {
+    if (active === "dashboard") return <DashboardPage />;
+    if (active === "suppliers") return <SuppliersPage />;
+    if (active === "pricing") return <KmcPricingPage />;
+    if (active === "api") return <ApiConnectionsPage />;
+    if (active === "emails")
+      return (
+        <PlaceholderPage
+          title="Emails"
+          body="Local email automation and templates for marketplaces."
+        />
+      );
+    if (active === "marketplaces")
+      return (
+        <PlaceholderPage
+          title="Marketplaces"
+          body="High-level marketplace settings, like which channels are live."
+        />
+      );
+    if (active === "settings")
+      return (
+        <PlaceholderPage
+          title="Settings"
+          body="Global settings for Ecom Copilot."
+        />
+      );
+    return null;
+  };
+
+  const topTitle =
+    active === "dashboard"
+      ? "Dashboard"
+      : active === "suppliers"
+      ? "Suppliers"
+      : active === "pricing"
+      ? "KMC Pricing"
+      : active === "emails"
+      ? "Emails"
+      : active === "marketplaces"
+      ? "Marketplaces"
+      : active === "settings"
+      ? "Settings / API"
+      : "API Connections";
+
+  return (
+    <div className="min-h-screen flex bg-slate-100 text-slate-900">
+      {/* Sidebar */}
+      <aside className="w-64 bg-slate-900 text-slate-100 flex flex-col">
+        <div className="px-6 py-5 border-b border-slate-800">
+          <div className="flex items-center gap-2">
+            <div className="h-9 w-9 rounded-xl bg-brand-500 flex items-center justify-center text-white font-bold">
+              EC
+            </div>
+            <div>
+              <div className="text-sm uppercase tracking-wide text-slate-400">
+                Ecom Copilot
+              </div>
+              <div className="text-xs text-slate-400 truncate">
+                Bwaaack • Copy and Paste
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <nav className="flex-1 px-3 py-4 space-y-1 text-sm">
+          <button
+            className={
+              "w-full flex items-center gap-2 px-3 py-2 rounded-lg " +
+              (active === "dashboard"
+                ? "bg-slate-800 text-white font-medium"
+                : "text-slate-200 hover:bg-slate-800")
+            }
+            onClick={() => setActive("dashboard")}
+          >
+            <span>Dashboard</span>
+          </button>
+          <button
+            className={
+              "w-full flex items-center gap-2 px-3 py-2 rounded-lg " +
+              (active === "suppliers"
+                ? "bg-slate-800 text-white font-medium"
+                : "text-slate-200 hover:bg-slate-800")
+            }
+            onClick={() => setActive("suppliers")}
+          >
+            <span>Suppliers</span>
+          </button>
+          <button
+            className={
+              "w-full flex items-center gap-2 px-3 py-2 rounded-lg " +
+              (active === "pricing"
+                ? "bg-slate-800 text-white font-medium"
+                : "text-slate-200 hover:bg-slate-800")
+            }
+            onClick={() => setActive("pricing")}
+          >
+            <span>Pricing (KMC)</span>
+          </button>
+          <button
+            className={
+              "w-full flex items-center gap-2 px-3 py-2 rounded-lg " +
+              (active === "emails"
+                ? "bg-slate-800 text-white font-medium"
+                : "text-slate-200 hover:bg-slate-800")
+            }
+            onClick={() => setActive("emails")}
+          >
+            <span>Emails</span>
+          </button>
+          <button
+            className={
+              "w-full flex items-center gap-2 px-3 py-2 rounded-lg " +
+              (active === "marketplaces"
+                ? "bg-slate-800 text-white font-medium"
+                : "text-slate-200 hover:bg-slate-800")
+            }
+            onClick={() => setActive("marketplaces")}
+          >
+            <span>Marketplaces</span>
+          </button>
+          <button
+            className={
+              "w-full flex items-center gap-2 px-3 py-2 rounded-lg " +
+              (active === "settings"
+                ? "bg-slate-800 text-white font-medium"
+                : "text-slate-200 hover:bg-slate-800")
+            }
+            onClick={() => setActive("settings")}
+          >
+            <span>Settings</span>
+          </button>
+          <button
+            className={
+              "w-full flex items-center gap-2 px-3 py-2 rounded-lg " +
+              (active === "api"
+                ? "bg-slate-800 text-white font-medium"
+                : "text-slate-200 hover:bg-slate-800")
+            }
+            onClick={() => setActive("api")}
+          >
+            <span>API Connections</span>
+          </button>
+        </nav>
+
+        <div className="px-4 py-3 border-t border-slate-800 text-xs text-slate-400">
+          Local build • {new Date().getFullYear()}
+        </div>
+      </aside>
+
+      {/* Main content */}
+      <main className="flex-1 flex flex-col">
+        {/* Top bar */}
+        <header className="h-16 px-8 border-b border-slate-200 bg-white flex items-center justify-between">
+          <div>
+            <div className="text-xs text-slate-500 uppercase tracking-wide">
+              {topTitle}
+            </div>
+            <div className="text-lg font-semibold">Welcome back, Kyle!</div>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="hidden md:flex items-center bg-slate-100 rounded-full px-3 py-1 text-xs text-slate-500">
+              <span className="mr-2">🔍</span> Search (coming soon)
+            </div>
+            <div className="h-8 w-8 rounded-full bg-slate-300 flex items-center justify-center text-xs font-semibold">
+              K
+            </div>
+          </div>
+        </header>
+
+        {/* Content */}
+        <div className="flex-1 p-6 overflow-auto space-y-6">
+          {renderPage()}
+        </div>
+      </main>
+    </div>
+  );
+};
+
+export default App;
+'@
+
+Set-Content -LiteralPath $appTsx -Value $appContent -Encoding UTF8
+Write-Host ("Updated App.tsx: {0}" -f $appTsx)
+
+Write-Host ""
+Write-Host "✅ KMC Pricing scaffolding applied." -ForegroundColor Green
+Write-Host "   1) Restart your API window (ecom_copilot_run_api.ps1)."
+Write-Host "   2) Make sure the React dev server is running (ecom_copilot_web_dev.bat)."
+Write-Host "   3) In the left sidebar, click 'Pricing (KMC)' to see the preview table."

@@ -1,0 +1,2 @@
+﻿supplier_code,sku,barcode,cost,weight_lb,weight_oz,length_in,width_in,height_in,shipping_cost_estimate,notes
+kmc,EXAMPLE-SKU-123,0123456789012,10.00,1,0,10,8,4,4.50,Sample row â€“ delete me

@@ -1,0 +1,9 @@
+﻿{
+  "rounding": { "mode": "ends_in_99" },
+  "shipping": { "mode": "placeholder_zero_until_carrier_feeds" },
+  "defaults": {
+    "min_margin": 0.18,
+    "max_margin": 0.35,
+    "dropship_fee": 0.00
+  }
+}

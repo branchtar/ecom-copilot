@@ -1,0 +1,14 @@
+{
+  "default": {
+    "target_margin_pct": 0.30,
+    "markup_pct": 0.50,
+    "round_to": 0.01,
+    "enforce_map": true
+  },
+  "kmc": {
+    "target_margin_pct": 0.30,
+    "markup_pct": 0.50,
+    "round_to": 0.01,
+    "enforce_map": true
+  }
+}

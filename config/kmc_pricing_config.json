@@ -1,0 +1,43 @@
+﻿{
+  "supplier_code": "KMC",
+  "dropship_fee": 2.50,
+  "handling_fee": 0.00,
+  "misc_fee": 0.00,
+  "min_gross_margin": 0.25,
+  "max_gross_margin": 0.50,
+  "marketplaces": [
+    {
+      "name": "amazon",
+      "fee_percent": 0.15
+    },
+    {
+      "name": "shopify",
+      "fee_percent": 0.029
+    },
+    {
+      "name": "walmart",
+      "fee_percent": 0.15
+    }
+  ],
+  "shipping_rules": {
+    "default": {
+      "base": 3.0,
+      "per_pound": 1.0
+    }
+  },
+  "csv": {
+    "input_file": "input/kmc_source.csv",
+    "output_file": "output/kmc_pricing_repriced.csv",
+    "columns": {
+      "sku": "SKU",
+      "name": "Description",
+      "brand": "Brand",
+      "cost": "Cost",
+      "upc": "UPC",
+      "length": "Length",
+      "width": "Width",
+      "height": "Height",
+      "weight": "Weight"
+    }
+  }
+}

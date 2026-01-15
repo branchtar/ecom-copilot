@@ -1,0 +1,20 @@
+{
+  "min_margin": 0.15,
+  "max_margin": 0.35,
+  "dim_divisor": 139,
+  "rounding_mode": "cents",
+  "sell_price_mode": "min",
+  "shipping_rate_table": [
+    { "max_wt": 1, "cost": 4.25 },
+    { "max_wt": 2, "cost": 5.10 },
+    { "max_wt": 3, "cost": 6.10 },
+    { "max_wt": 5, "cost": 8.50 },
+    { "max_wt": 10, "cost": 12.75 },
+    { "max_wt": 20, "cost": 19.95 }
+  ],
+  "marketplace_fee_table": {
+    "amazon": { "default": 2.50 },
+    "walmart": { "default": 2.25 },
+    "shopify": { "default": 0.00 }
+  }
+}

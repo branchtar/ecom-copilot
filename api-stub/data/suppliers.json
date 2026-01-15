@@ -1,0 +1,66 @@
+{
+  "suppliers": [
+    {
+      "id": "KMC",
+      "key": "KMC",
+      "name": "KMC Music",
+      "location": "USA",
+      "notes": "",
+      "settings": {
+        "handling_fee": 0,
+        "dropship_fee": 0,
+        "misc_fee": 0,
+        "min_gross_margin_pct": 22,
+        "max_gross_margin_pct": 60
+      },
+      "mapping": {
+        "sku": "",
+        "title": "",
+        "brand": "",
+        "upc": "",
+        "cost": "",
+        "msrp": "",
+        "qty": "",
+        "weight": ""
+      },
+      "feed": {
+        "last_upload_name": "",
+        "last_upload_path": "",
+        "last_upload_at": "",
+        "headers": [],
+        "sample_rows": []
+      }
+    },
+    {
+      "id": "ENSOUL",
+      "key": "ENSOUL",
+      "name": "Ensoul Music",
+      "location": "USA",
+      "notes": "",
+      "settings": {
+        "handling_fee": 0,
+        "dropship_fee": 0,
+        "misc_fee": 0,
+        "min_gross_margin_pct": 22,
+        "max_gross_margin_pct": 60
+      },
+      "mapping": {
+        "sku": "",
+        "title": "",
+        "brand": "",
+        "upc": "",
+        "cost": "",
+        "msrp": "",
+        "qty": "",
+        "weight": ""
+      },
+      "feed": {
+        "last_upload_name": "",
+        "last_upload_path": "",
+        "last_upload_at": "",
+        "headers": [],
+        "sample_rows": []
+      }
+    }
+  ]
+}

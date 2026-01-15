@@ -1,0 +1,6 @@
+﻿{
+  "amazon":  { "type": "percent_of_price", "percent": 0.15, "per_item": 0.00 },
+  "ebay":    { "type": "percent_of_price", "percent": 0.13, "per_item": 0.00 },
+  "walmart": { "type": "percent_of_price", "percent": 0.15, "per_item": 0.00 },
+  "shopify": { "type": "percent_of_price", "percent": 0.03, "per_item": 0.00 }
+}

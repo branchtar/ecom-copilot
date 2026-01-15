@@ -1,0 +1,10 @@
+supplier,sku,name,brand,cost,base_cost_with_fees,msrp,price_min_gm,price_max_gm
+KMC,2895H00210-U,,AKG,1084.0,1084.0,1799.5,1389.74,
+KMC,3247H00010-U,AKG PT45 Wireless Body-pack Transmitter Band-A,AKG,146.0,146.0,287.5,187.18,
+KMC,3248X00010-U,AKG Perception 45 Sports Wireless System. Band-A,AKG,244.0,244.0,375.0,312.82,
+KMC,3249H00010-U,AKG Perception 45 Presenter Wireless System. Band-A,AKG,244.0,244.0,375.0,312.82,
+KMC,3251H00010-U,AKG 3251H00010 Perception Wireless 45 Vocal Microphone Set. Band-A,AKG,176.0,176.0,281.25,225.64,
+KMC,3347X00110-U,AKG WMS40 Mini Vocal Wireless System. Band-US25-A,AKG,112.0,112.0,181.25,143.59,
+KMC,3347X00120-U,AKG WMS40 Mini Vocal Wireless System. Band-US25-B,AKG,112.0,112.0,181.25,143.59,
+KMC,3347X00130-U,AKG WMS40 Mini Vocal Wireless System. Band-US25-C,AKG,112.0,112.0,181.25,143.59,
+KMC,3347X00140-U,AKG WMS40 Mini Vocal Wireless System. Band-US25-D,AKG,112.0,112.0,181.25,143.59,

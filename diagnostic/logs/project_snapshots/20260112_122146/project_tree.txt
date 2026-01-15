@@ -1,0 +1,29 @@
+﻿Project root: C:\Users\kylem\OneDrive - Copy and Paste LLC\Bwaaack\Ecom Copilot\diagnostic
+Snapshot UTC:  2026-01-12T20:21:46.5327321Z
+
+Excluded dirs:
+  - node_modules
+  - .git
+  - .venv
+  - venv
+  - __pycache__
+  - dist
+  - build
+  - .next
+  - .cache
+  - out
+  - coverage
+  - tmp
+  - temp
+  - .pytest_cache
+  - .mypy_cache
+  - .ruff_cache
+  - artifacts
+  - logs\project_snapshots
+
+[F] diagnostic_api_check.py  (0.29 KB)
+[F] diagnostic_run_api_check.bat  (0.47 KB)
+[F] diagnostic_run_api_check.ps1  (1.22 KB)
+[D] logs
+[D] logs\project_snapshots
+[F] project_snapshot.ps1  (5.69 KB)

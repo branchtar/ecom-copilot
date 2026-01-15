@@ -1,0 +1,3 @@
+﻿supplier_code,supplier_name,origin_zip,default_handling_days,amazon_min_margin_pct,amazon_max_margin_pct
+kmc,KMC Music,92663,2,0.20,0.35
+ensoul,Ensoul Music,92663,2,0.20,0.35
