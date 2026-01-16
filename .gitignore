@@ -31,3 +31,9 @@ keys/
 
 # OneDrive noise (optional)
 ~$*
+# --- local/dev artifacts ---
+.history/
+logs/
+run/_pids/
+**/node_modules/
+*.bak_*
