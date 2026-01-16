@@ -1,21 +1,33 @@
-﻿
-# Project Snapshot outputs (generated)
-logs/project_snapshots/
-logs/project_snapshots/*.zip
-node_modules/
+﻿# Node / React
 ui-web/node_modules/
-api/__pycache__/
-**/__pycache__/
+ui-web/build/
+ui-web/.cache/
+ui-web/.env
+ui-web/.env.*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Python
+__pycache__/
 *.pyc
+.venv/
+venv/
 .env
 .env.*
-!.env.example
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Secrets / keys
 keys/
 **/keys/
 *.pem
-*.key
 *.pfx
-dist/
-build/
-.coverage/
-.vscode/settings.json
+
+# OneDrive noise (optional)
+~$*
