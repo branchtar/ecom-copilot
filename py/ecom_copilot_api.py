@@ -1,4 +1,4 @@
-﻿"""
+"""
 Ecom Copilot - Local API
 Dashboard + Suppliers + KMC pricing backbone for the web UI.
 """
@@ -630,3 +630,313 @@ def api_pricing_download(out_id: str):
     if not path or not os.path.exists(path):
         return {"ok": False, "error": "Output not found (restart may have cleared index). Re-run pricing."}
     return FileResponse(path, media_type="text/csv", filename=os.path.basename(path))
+
+
+
+----                                                                                     ----------
+C:\Users\Kylem\OneDrive - Copy and Paste LLC\Bwaaack\Ecom Copilot\py\ecom_copilot_api.py        133
+
+
+# EC_SUPPLIER_MODULE_START
+from pathlib import Path
+import csv
+import re
+from typing import Any, Dict, List, Optional
+
+from fastapi import UploadFile, File, HTTPException
+from pydantic import BaseModel
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SUPPLIER_DATA_DIR = PROJECT_ROOT / "data" / "suppliers"
+_SUPPLIER_KEY_RE = re.compile(r"^[A-Za-z0-9_\-]+$")
+
+def _safe_supplier_key(supplier_key: str) -> str:
+    supplier_key = (supplier_key or "").strip()
+    if not supplier_key or not _SUPPLIER_KEY_RE.match(supplier_key):
+        raise HTTPException(status_code=400, detail="Invalid supplier_key (use letters, numbers, _ or -).")
+    return supplier_key
+
+def _supplier_dir(supplier_key: str) -> Path:
+    supplier_key = _safe_supplier_key(supplier_key)
+    d = SUPPLIER_DATA_DIR / supplier_key
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+def _read_csv_sample(path: Path, limit: int = 25) -> Dict[str, Any]:
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Feed file not found. Upload a CSV first.")
+
+    rows: List[Dict[str, Any]] = []
+    headers: List[str] = []
+    total_rows = 0
+
+    with path.open("r", encoding="utf-8-sig", newline="") as f:
+        reader = csv.DictReader(f)
+        headers = reader.fieldnames or []
+        for r in reader:
+            total_rows += 1
+            if len(rows) < limit:
+                rows.append(r)
+
+    return {"headers": headers, "rows": rows, "total_rows": total_rows}
+
+class SupplierMapping(BaseModel):
+    sku_col: str
+    cost_col: str
+    upc_col: Optional[str] = None
+    brand_col: Optional[str] = None
+    title_col: Optional[str] = None
+
+@app.post("/api/suppliers/{supplier_key}/feed/upload")
+async def upload_supplier_feed(supplier_key: str, file: UploadFile = File(...)):
+    supplier_key = _safe_supplier_key(supplier_key)
+
+    if not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Please upload a .csv file.")
+
+    d = _supplier_dir(supplier_key)
+    feed_path = d / "feed.csv"
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Empty file.")
+    feed_path.write_bytes(content)
+
+    return {"supplier_key": supplier_key, "feed_path": str(feed_path), **_read_csv_sample(feed_path, limit=25)}
+
+@app.get("/api/suppliers/{supplier_key}/feed/sample")
+def get_supplier_feed_sample(supplier_key: str, limit: int = 25):
+    supplier_key = _safe_supplier_key(supplier_key)
+    d = _supplier_dir(supplier_key)
+    feed_path = d / "feed.csv"
+    limit = max(1, min(int(limit or 25), 200))
+    return {"supplier_key": supplier_key, **_read_csv_sample(feed_path, limit=limit)}
+
+@app.get("/api/suppliers/{supplier_key}/feed/status")
+def get_supplier_feed_status(supplier_key: str):
+    supplier_key = _safe_supplier_key(supplier_key)
+    d = _supplier_dir(supplier_key)
+
+    feed_path = d / "feed.csv"
+    mapping_path = d / "mapping.json"
+
+    status = {
+        "supplier_key": supplier_key,
+        "has_feed": feed_path.exists(),
+        "has_mapping": mapping_path.exists(),
+        "feed_path": str(feed_path),
+        "mapping_path": str(mapping_path),
+    }
+
+    if feed_path.exists():
+        try:
+            status.update(_read_csv_sample(feed_path, limit=1))
+        except Exception:
+            pass
+
+    if mapping_path.exists():
+        try:
+            import json
+            status["mapping"] = json.loads(mapping_path.read_text(encoding="utf-8"))
+        except Exception:
+            status["mapping"] = None
+
+    return status
+
+@app.post("/api/suppliers/{supplier_key}/feed/mapping")
+def set_supplier_feed_mapping(supplier_key: str, mapping: SupplierMapping):
+    supplier_key = _safe_supplier_key(supplier_key)
+    d = _supplier_dir(supplier_key)
+
+    feed_path = d / "feed.csv"
+    if not feed_path.exists():
+        raise HTTPException(status_code=400, detail="Upload a CSV feed first.")
+
+    sample = _read_csv_sample(feed_path, limit=1)
+    headers = set(sample.get("headers") or [])
+    required = [mapping.sku_col, mapping.cost_col]
+    missing = [c for c in required if c not in headers]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"Missing columns in CSV: {missing}")
+
+    import json
+    mapping_path = d / "mapping.json"
+    mapping_path.write_text(mapping.model_dump_json(indent=2), encoding="utf-8")
+
+    return {"supplier_key": supplier_key, "ok": True, "mapping": mapping.model_dump()}
+
+@app.get("/api/suppliers/{supplier_key}/feed/mapping")
+def get_supplier_feed_mapping(supplier_key: str):
+    supplier_key = _safe_supplier_key(supplier_key)
+    d = _supplier_dir(supplier_key)
+    mapping_path = d / "mapping.json"
+    if not mapping_path.exists():
+        return {"supplier_key": supplier_key, "mapping": None}
+    import json
+    return {"supplier_key": supplier_key, "mapping": json.loads(mapping_path.read_text(encoding="utf-8"))}
+# EC_SUPPLIER_MODULE_END
+
+
+# =========================
+# =========================
+# =========================
+# EC_SUPPLIERS_API_START
+# =========================
+import json
+from typing import List, Optional
+from pydantic import BaseModel
+
+def _suppliers_path():
+    # Store in project root /data/suppliers.json
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    data_dir = os.path.join(root, "data")
+    os.makedirs(data_dir, exist_ok=True)
+    return os.path.join(data_dir, "suppliers.json")
+
+def _load_suppliers() -> list:
+    path = _suppliers_path()
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f) or []
+    except Exception:
+        return []
+
+def _save_suppliers(items: list):
+    path = _suppliers_path()
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(items, f, indent=2)
+
+def _normalize_supplier(s: dict) -> dict:
+    # Make sure older records still work after we add fields.
+    return {
+        "key": (s.get("key") or "").strip(),
+        "name": (s.get("name") or "").strip(),
+        "location": (s.get("location") or "USA").strip(),
+        "contact_name": (s.get("contact_name") or "").strip(),
+        "contact_email": (s.get("contact_email") or "").strip(),
+        "phone": (s.get("phone") or "").strip(),
+        "website": (s.get("website") or "").strip(),
+        "return_address": (s.get("return_address") or "").strip(),
+    }
+
+class SupplierIn(BaseModel):
+    key: str
+    name: str
+    location: Optional[str] = "USA"
+    contact_name: Optional[str] = ""
+    contact_email: Optional[str] = ""
+    phone: Optional[str] = ""
+    website: Optional[str] = ""
+    return_address: Optional[str] = ""
+
+class SupplierUpdate(BaseModel):
+    # key is immutable (we update by key)
+    name: Optional[str] = None
+    location: Optional[str] = None
+    contact_name: Optional[str] = None
+    contact_email: Optional[str] = None
+    phone: Optional[str] = None
+    website: Optional[str] = None
+    return_address: Optional[str] = None
+
+class SupplierOut(BaseModel):
+    key: str
+    name: str
+    location: str
+    contact_name: str
+    contact_email: str
+    phone: str
+    website: str
+    return_address: str
+
+def _find_supplier(items: list, supplier_key: str):
+    for i, s in enumerate(items):
+        if (s.get("key") or "") == supplier_key:
+            return i, s
+    return None, None
+
+@app.get("/api/suppliers", response_model=List[SupplierOut])
+def api_list_suppliers():
+    items = [_normalize_supplier(x) for x in _load_suppliers()]
+    items = sorted(items, key=lambda x: ((x.get("name") or "").lower(), (x.get("key") or "")))
+    return items
+
+@app.get("/api/suppliers/{supplier_key}", response_model=SupplierOut)
+def api_get_supplier(supplier_key: str):
+    supplier_key = (supplier_key or "").strip()
+    items = [_normalize_supplier(x) for x in _load_suppliers()]
+    _, s = _find_supplier(items, supplier_key)
+    if not s:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+    return s
+
+@app.post("/api/suppliers", response_model=SupplierOut)
+def api_create_supplier(payload: SupplierIn):
+    items = [_normalize_supplier(x) for x in _load_suppliers()]
+    key = (payload.key or "").strip()
+    if not key:
+        raise HTTPException(status_code=400, detail="Supplier key is required.")
+    if any((s.get("key") == key) for s in items):
+        raise HTTPException(status_code=400, detail=f"Supplier key already exists: {key}")
+
+    sup = _normalize_supplier({
+        "key": key,
+        "name": (payload.name or "").strip(),
+        "location": (payload.location or "USA").strip(),
+        "contact_name": payload.contact_name or "",
+        "contact_email": payload.contact_email or "",
+        "phone": payload.phone or "",
+        "website": payload.website or "",
+        "return_address": payload.return_address or "",
+    })
+
+    if not sup["name"]:
+        raise HTTPException(status_code=400, detail="Supplier name is required.")
+
+    items.append(sup)
+    _save_suppliers(items)
+    return sup
+
+@app.put("/api/suppliers/{supplier_key}", response_model=SupplierOut)
+def api_update_supplier(supplier_key: str, payload: SupplierUpdate):
+    supplier_key = (supplier_key or "").strip()
+    items = [_normalize_supplier(x) for x in _load_suppliers()]
+    idx, existing = _find_supplier(items, supplier_key)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+
+    updated = dict(existing)
+
+    if payload.name is not None: updated["name"] = (payload.name or "").strip()
+    if payload.location is not None: updated["location"] = (payload.location or "USA").strip()
+    if payload.contact_name is not None: updated["contact_name"] = (payload.contact_name or "").strip()
+    if payload.contact_email is not None: updated["contact_email"] = (payload.contact_email or "").strip()
+    if payload.phone is not None: updated["phone"] = (payload.phone or "").strip()
+    if payload.website is not None: updated["website"] = (payload.website or "").strip()
+    if payload.return_address is not None: updated["return_address"] = (payload.return_address or "").strip()
+
+    if not updated.get("name"):
+        raise HTTPException(status_code=400, detail="Supplier name is required.")
+
+    items[idx] = _normalize_supplier(updated)
+    _save_suppliers(items)
+    return items[idx]
+
+@app.delete("/api/suppliers/{supplier_key}")
+def api_delete_supplier(supplier_key: str):
+    supplier_key = (supplier_key or "").strip()
+    items = [_normalize_supplier(x) for x in _load_suppliers()]
+    idx, existing = _find_supplier(items, supplier_key)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+    items.pop(idx)
+    _save_suppliers(items)
+    return {"ok": True, "deleted_key": supplier_key}
+
+# =========================
+# EC_SUPPLIERS_API_END
+# =========================
+# =========================
+# =========================

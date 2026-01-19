@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 
+const API_BASE = (process.env.REACT_APP_API_BASE_URL || "").replace(/\/+$/,"");
+
 /**
  * EC_TEMP_HARDCOSTS_SHIM_START
  * Temporary compiler-safe fallbacks so Pricing.tsx can compile while we move on to Login.
@@ -15,13 +17,15 @@ const setHardCostsMsg = __ec_noop;
 
   // EC_HARD_COSTS_HELPERS
   async function apiGet(url: string) {
-    const r = await fetch(url);
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const full = (API_BASE && url.startsWith("/api/")) ? `${API_BASE}${url}` : url;
+    const r = await fetch(full);
+if (!r.ok) throw new Error(`HTTP ${r.status}`);
     return r.json();
   }
   async function apiPut(url: string, body: any) {
-    const r = await fetch(url, {
-      method: "PUT",
+    const full = (API_BASE && url.startsWith("/api/")) ? `${API_BASE}${url}` : url;
+    const r = await fetch(full, {
+method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
