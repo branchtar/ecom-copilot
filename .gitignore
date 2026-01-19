@@ -37,3 +37,6 @@ logs/
 run/_pids/
 **/node_modules/
 *.bak_*
+# --- allow example env files (keep real .env ignored) ---
+!**/.env*.example
+!ui-web/.env.production.example
