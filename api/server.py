@@ -9,6 +9,54 @@ app = FastAPI()
 
 
 
+
+
+# === EC_AMAZON_CONNECT_START ===
+# Amazon Connect (Step 1): generate the Seller Central consent URL.
+# Env vars (set locally or in AWS App Runner):
+#   AMAZON_SPAPI_APP_ID         (required)  e.g., amzn1.sellerapps.app....
+#   AMAZON_SELLER_CENTRAL_BASE  (optional)  default https://sellercentral.amazon.com
+#   AMAZON_SPAPI_REDIRECT_URI   (optional)  callback URL (we'll add callback endpoint next)
+#   AMAZON_SPAPI_USE_BETA       (optional)  true/1 to append version=beta for draft apps
+#
+# This endpoint has NO side effects. It only returns an authorize_url.
+
+@app.get("/api/integrations/amazon/start")
+def amazon_connect_start(tenant: str = "dev"):
+    import os, json, time, secrets, base64
+    from urllib.parse import urlencode
+
+    application_id = (os.getenv("AMAZON_SPAPI_APP_ID") or "").strip()
+    if not application_id:
+        return {"ok": False, "error": "Missing env var AMAZON_SPAPI_APP_ID"}
+
+    seller_central = (os.getenv("AMAZON_SELLER_CENTRAL_BASE") or "https://sellercentral.amazon.com").rstrip("/")
+    redirect_uri = (os.getenv("AMAZON_SPAPI_REDIRECT_URI") or "").strip()
+    use_beta = (os.getenv("AMAZON_SPAPI_USE_BETA") or "").strip().lower() in ("1", "true", "yes", "y")
+
+    state_obj = {"tenant": tenant, "ts": int(time.time()), "nonce": secrets.token_urlsafe(12)}
+    state_json = json.dumps(state_obj, separators=(", ", ":")).encode("utf-8")
+    state = base64.urlsafe_b64encode(state_json).decode("utf-8").rstrip("=")
+
+    params = {
+        "application_id": application_id,
+        "state": state,
+    }
+    if redirect_uri:
+        params["redirect_uri"] = redirect_uri
+    if use_beta:
+        params["version"] = "beta"
+
+    authorize_url = f"{seller_central}/apps/authorize/consent?{urlencode(params)}"
+
+    return {
+        "ok": True,
+        "authorize_url": authorize_url,
+        "state": state,
+        "seller_central": seller_central,
+    }
+
+# === EC_AMAZON_CONNECT_END ===
 
 # === EC_PRICING_START ===
 # Pricing feature: config + preview endpoints
