@@ -40,3 +40,24 @@ run/_pids/
 # --- allow example env files (keep real .env ignored) ---
 !**/.env*.example
 !ui-web/.env.production.example
+
+# --- Ecom Copilot scaffold ---
+# env
+.env
+.env.*
+!.env.example
+
+# next
+apps/web/.next
+apps/web/node_modules
+apps/web/out
+
+# python
+.venv
+__pycache__
+*.pyc
+
+# logs/output
+logs
+output
+
