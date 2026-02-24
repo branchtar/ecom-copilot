@@ -1,94 +1,131 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
+import os
 import json
+import sqlite3
 from pathlib import Path
+from typing import Optional
+
+import requests
+from cryptography.fernet import Fernet, InvalidToken
+
 from pricing_engine import compute_pricing
 
 app = FastAPI()
 
-
-
+# ============================================================
+# CORS
+# ============================================================
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# === EC_PRICING_START ===
-# Pricing feature: config + preview endpoints
-# (Safe block; can be expanded later with real marketplace fee lookups)
+# ============================================================
+# Paths
+# ============================================================
+BASE_DIR = Path(__file__).resolve().parent
+CONFIG_PATH = BASE_DIR / "pricing_config.json"
+DB_PATH = BASE_DIR / "ecom_copilot.db"
 
-CONFIG_PATH = Path(__file__).parent / "pricing_config.json"
+# ============================================================
+# Encryption (Fernet)
+#   Set TOKEN_ENC_KEY in env (one-time)
+# ============================================================
+TOKEN_ENC_KEY = os.getenv("TOKEN_ENC_KEY", "").strip()
+if not TOKEN_ENC_KEY:
+    # Fail loudly for production; for local dev you can temporarily generate one.
+    # But you should set it in your .env for persistence.
+    raise RuntimeError(
+        "Missing TOKEN_ENC_KEY in environment. Generate one with:\n"
+        "  python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
+    )
 
+fernet = Fernet(TOKEN_ENC_KEY.encode("utf-8"))
+
+# ============================================================
+# DB helpers
+# ============================================================
+def db_conn():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def db_init():
+    with db_conn() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sellers (
+                seller_id TEXT PRIMARY KEY,
+                amazon_refresh_token_enc TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+            """
+        )
+        conn.commit()
+
+db_init()
+
+def encrypt_text(s: str) -> str:
+    return fernet.encrypt(s.encode("utf-8")).decode("utf-8")
+
+def decrypt_text(s: str) -> str:
+    return fernet.decrypt(s.encode("utf-8")).decode("utf-8")
+
+# ============================================================
+# Pricing config
+# ============================================================
 def load_pricing_config() -> dict:
     try:
         if CONFIG_PATH.exists():
             return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
     except Exception:
         pass
-    return {}
+    return {"version": 1, "suppliers": {}}
 
 def save_pricing_config(cfg: dict) -> None:
     CONFIG_PATH.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 
-@app.get("/pricing/config")
-def pricing_get_config():
-    return load_pricing_config()
-
-@app.post("/pricing/config")
-def pricing_set_config(cfg: dict):
-    save_pricing_config(cfg)
-    return {"ok": True}
-
-@app.post("/pricing/preview")
-def pricing_preview(payload: dict):
-    cfg = load_pricing_config()
-    return compute_pricing(payload, cfg)
-
-# === EC_PRICING_END ===
-# === EC_DASHBOARD_START ===
-# Minimal dashboard endpoints so the UI stops showing "Could not reach API".
-# Expand these later with real data sources.
-
+# ============================================================
+# Health + Dashboard (single source of truth)
+# ============================================================
 @app.get("/health")
 def health():
     return {"ok": True}
 
 @app.get("/dashboard/kpis")
 def dashboard_kpis():
+    # Keep ONE shape. Pick the UI shape you want and stick to it.
     return {
-        "total_sales_7d": 0,
-        "orders_7d": 0,
-        "returns_7d": 0,
-        "items_sold_7d": 0
+        "totalSales7d": 0,
+        "orders7d": 0,
+        "returns7d": 0,
+        "itemsSold7d": 0
     }
 
 @app.get("/dashboard/marketplace-balances")
 def dashboard_marketplace_balances():
-    # UI can render "No balances loaded yet."
     return []
 
 @app.get("/dashboard/recent-orders")
 def dashboard_recent_orders():
-    # UI can render "No orders loaded yet."
     return []
 
 @app.get("/dashboard/stock-alerts")
 def dashboard_stock_alerts():
-    # UI can render "No low stock alerts yet."
     return []
-# === EC_DASHBOARD_END ===
 
-
-
-
-
-# Allow the React dev server
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# --- Demo endpoints used by SuppliersPage ---
+# ============================================================
+# Suppliers (demo)
+# ============================================================
 @app.get("/api/suppliers")
 def list_suppliers():
     return [
@@ -107,64 +144,12 @@ def supplier_detail(supplier_id: str):
         "notes": "Demo detail endpoint",
     }
 
-# Optional: pricing preview endpoints SuppliersPage probes
-@app.get("/api/suppliers/{supplier_id}/pricing_preview")
-def pricing_preview_supplier(supplier_id: str):
-    return {"rows": []}
-
-@app.get("/api/kmc/pricing_preview")
-def pricing_preview_kmc():
-    return {"rows": []}
-
-@app.get("/api/pricing/kmc_preview")
-def pricing_preview_kmc_alt():
-    return {"rows": []}
-
-# -------------------------------------------------------------------
-# UI compatibility endpoints (React dashboard expects these)
-# -------------------------------------------------------------------
-
-@app.get("/health")
-def health():
-    return {"ok": True}
-
-@app.get("/dashboard/kpis")
-def dashboard_kpis():
-    # Placeholder metrics until real data wiring is implemented
-    return {
-        "totalSales7d": 0,
-        "orders7d": 0,
-        "returns7d": 0,
-        "itemsSold7d": 0
-    }
-
-@app.get("/dashboard/orders_recent")
-def dashboard_orders_recent():
-    return []
-
-@app.get("/dashboard/stock_alerts")
-def dashboard_stock_alerts():
-    return []
-
-
-# === EC_PRICING_CONFIG_START ===
-# Pricing config endpoints (safe, additive)
-PRICING_CONFIG_PATH = Path(__file__).resolve().parent / "pricing_config.json"
-
-def _load_pricing_config():
-    try:
-        with open(PRICING_CONFIG_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return {"version": 1, "suppliers": {}}
-
-def _save_pricing_config(cfg: dict):
-    with open(PRICING_CONFIG_PATH, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, indent=2)
-
+# ============================================================
+# Pricing endpoints (clean, unified)
+# ============================================================
 @app.get("/api/pricing/config")
 def get_pricing_config(supplier_key: str = ""):
-    cfg = _load_pricing_config()
+    cfg = load_pricing_config()
     if supplier_key:
         sup = (cfg.get("suppliers") or {}).get(supplier_key)
         return {"supplier_key": supplier_key, "config": sup}
@@ -172,17 +157,13 @@ def get_pricing_config(supplier_key: str = ""):
 
 @app.put("/api/pricing/config")
 def put_pricing_config(payload: dict):
-    """
-    payload:
-      { "supplier_key": "KMC", "hard_costs": {...} }
-    """
     supplier_key = (payload or {}).get("supplier_key")
     hard_costs = (payload or {}).get("hard_costs") or {}
 
     if not supplier_key:
         return {"ok": False, "error": "supplier_key required"}
 
-    cfg = _load_pricing_config()
+    cfg = load_pricing_config()
     cfg.setdefault("version", 1)
     cfg.setdefault("suppliers", {})
 
@@ -206,6 +187,70 @@ def put_pricing_config(payload: dict):
             except Exception:
                 pass
 
-    _save_pricing_config(cfg)
+    save_pricing_config(cfg)
     return {"ok": True, "supplier_key": supplier_key, "hard_costs": cfg["suppliers"][supplier_key]["hard_costs"]}
-# === EC_PRICING_CONFIG_END ===
+
+@app.post("/api/pricing/preview")
+def pricing_preview(payload: dict):
+    cfg = load_pricing_config()
+    return compute_pricing(payload, cfg)
+
+# ============================================================
+# Amazon Multi-tenant “Connect” (V0 Launch)
+#   Users paste their Refresh Token.
+#   We validate by requesting an LWA access token.
+# ============================================================
+class AmazonConnectIn(BaseModel):
+    seller_id: str
+    refresh_token: str
+
+def lwa_exchange_refresh_for_access(refresh_token: str) -> str:
+    client_id = os.getenv("LWA_CLIENT_ID", "").strip()
+    client_secret = os.getenv("LWA_CLIENT_SECRET", "").strip()
+    if not client_id or not client_secret:
+        raise HTTPException(status_code=500, detail="Missing LWA_CLIENT_ID or LWA_CLIENT_SECRET on server")
+
+    url = "https://api.amazon.com/auth/o2/token"
+    data = {
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+        "client_id": client_id,
+        "client_secret": client_secret,
+    }
+    r = requests.post(url, data=data, timeout=30)
+    if r.status_code != 200:
+        # Don't leak full details—just enough for debugging
+        raise HTTPException(status_code=400, detail=f"LWA token exchange failed: {r.status_code}")
+
+    j = r.json()
+    access_token = j.get("access_token")
+    if not access_token:
+        raise HTTPException(status_code=400, detail="LWA token exchange returned no access_token")
+    return access_token
+
+@app.post("/amazon/connect")
+def amazon_connect(inp: AmazonConnectIn):
+    # 1) validate refresh token works
+    _ = lwa_exchange_refresh_for_access(inp.refresh_token)
+
+    # 2) store encrypted refresh token per seller
+    token_enc = encrypt_text(inp.refresh_token)
+
+    with db_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO sellers (seller_id, amazon_refresh_token_enc)
+            VALUES (?, ?)
+            ON CONFLICT(seller_id) DO UPDATE SET amazon_refresh_token_enc=excluded.amazon_refresh_token_enc
+            """,
+            (inp.seller_id, token_enc),
+        )
+        conn.commit()
+
+    return {"ok": True, "seller_id": inp.seller_id}
+
+@app.get("/amazon/sellers")
+def amazon_sellers():
+    with db_conn() as conn:
+        rows = conn.execute("SELECT seller_id, created_at FROM sellers ORDER BY created_at DESC").fetchall()
+    return [{"seller_id": r["seller_id"], "created_at": r["created_at"]} for r in rows]
