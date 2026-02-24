@@ -61,3 +61,6 @@ __pycache__
 logs
 output
 
+keys/token_enc_key.txt
+*.db
+api/ecom_copilot.db
