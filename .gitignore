@@ -64,3 +64,5 @@ output
 keys/token_enc_key.txt
 *.db
 api/ecom_copilot.db
+*.bak.*
+*.bak
