@@ -1,0 +1,16 @@
+version: 1.0
+runtime: nodejs18
+
+build:
+  commands:
+    - cd apps/web
+    - npm ci
+    - npm run build
+
+run:
+  command: cd apps/web && npm run start
+  network:
+    port: 3000
+  env:
+    - name: NODE_ENV
+      value: production
