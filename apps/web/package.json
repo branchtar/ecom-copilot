@@ -4,7 +4,7 @@
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",
-    "start": "next start -p $PORT"
+    "start": "next start"
   },
   "dependencies": {
     "next": "latest",
@@ -13,3 +13,4 @@
     "next-auth": "latest"
   }
 }
+
