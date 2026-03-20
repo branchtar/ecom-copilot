@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 import json
@@ -57,6 +57,21 @@ def amazon_connect_start(tenant: str = "dev"):
     }
 
 # === EC_AMAZON_CONNECT_END ===
+
+# === EC_AMAZON_CALLBACK_START ===
+# Amazon Connect (Step 2): receive the Seller Central redirect.
+# This is intentionally simple for now so we can verify the public callback works.
+
+@app.get("/auth/amazon/callback")
+async def amazon_connect_callback(request: Request):
+    query_params = dict(request.query_params)
+
+    return {
+        "ok": True,
+        "message": "Amazon OAuth callback received",
+        "query_params": query_params,
+    }
+# === EC_AMAZON_CALLBACK_END ===
 
 
 # === EC_PRICING_START ===
@@ -258,3 +273,4 @@ def put_pricing_config(payload: dict):
     _save_pricing_config(cfg)
     return {"ok": True, "supplier_key": supplier_key, "hard_costs": cfg["suppliers"][supplier_key]["hard_costs"]}
 # === EC_PRICING_CONFIG_END ===
+
