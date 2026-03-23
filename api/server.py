@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 
 import json
 from pathlib import Path
@@ -72,6 +73,28 @@ async def amazon_connect_callback(request: Request):
         "query_params": query_params,
     }
 # === EC_AMAZON_CALLBACK_END ===
+
+# === EC_AMAZON_BROWSER_START ===
+# Browser-facing Amazon OAuth entrypoint.
+# Redirects the user to Seller Central consent using the existing URL builder.
+
+@app.get("/auth/amazon/start")
+def amazon_oauth_browser_start(tenant: str = "dev"):
+    result = amazon_connect_start(tenant=tenant)
+
+    if not isinstance(result, dict):
+        return {"ok": False, "error": "Unexpected response building Amazon authorize URL"}
+
+    if not result.get("ok"):
+        return result
+
+    authorize_url = (result.get("authorize_url") or "").strip()
+    if not authorize_url:
+        return {"ok": False, "error": "Missing authorize_url"}
+
+    return RedirectResponse(url=authorize_url, status_code=307)
+
+# === EC_AMAZON_BROWSER_START_END ===
 
 
 # === EC_PRICING_START ===
