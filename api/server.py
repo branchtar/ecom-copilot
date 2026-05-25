@@ -251,6 +251,45 @@ def amazon_oauth_browser_start(tenant: str = "dev"):
 
 # === EC_AMAZON_BROWSER_START_END ===
 
+# === EC_AMAZON_STATUS_START ===
+# Amazon Connect (Step 3): safe connection-status check for the dashboard.
+# Returns only non-token metadata — never exposes access/refresh tokens.
+
+@app.get("/api/integrations/amazon/status")
+def amazon_connection_status(tenant: str = "dev"):
+    try:
+        store = get_connection_store()
+        meta = store.get_connection_meta(tenant=tenant)
+    except MissingConfigError as exc:
+        logger.error("amazon_connection_status config error: %s", exc)
+        return {
+            "ok": False,
+            "connected": False,
+            "tenant": tenant,
+            "selling_partner_id": None,
+            "error": "Server configuration error",
+        }
+    except (ConnectionStorageError, AmazonOAuthError) as exc:
+        logger.error("amazon_connection_status storage error: %s", exc)
+        return {
+            "ok": False,
+            "connected": False,
+            "tenant": tenant,
+            "selling_partner_id": None,
+            "error": "Could not read connection status",
+        }
+
+    if meta is None:
+        return {"ok": True, "connected": False, "tenant": tenant, "selling_partner_id": None}
+
+    return {
+        "ok": True,
+        "connected": True,
+        "tenant": meta.get("tenant", tenant),
+        "selling_partner_id": meta.get("selling_partner_id"),
+    }
+# === EC_AMAZON_STATUS_END ===
+
 
 # === EC_PRICING_START ===
 # Pricing feature: config + preview endpoints
@@ -324,7 +363,12 @@ def dashboard_stock_alerts():
 # Allow the React dev server
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "https://www.ecomnavigation.com",
+        "https://ecomnavigation.com",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

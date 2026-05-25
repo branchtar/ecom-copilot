@@ -5,10 +5,16 @@ import Sidebar from "../../components/ui/Sidebar";
 import Topbar from "../../components/ui/Topbar";
 import KpiCard from "../../components/ui/KpiCard";
 import Panel from "../../components/ui/Panel";
+import ConnectAmazonButton from "../../components/ConnectAmazonButton";
 
 export default function DashboardPage() {
   const [apiStatus, setApiStatus] = useState("Checking...");
   const [apiBase, setApiBase] = useState("");
+  const [amazonStatus, setAmazonStatus] = useState({
+    loading: true,
+    connected: false,
+    selling_partner_id: null,
+  });
 
   useEffect(() => {
     const base = process.env.NEXT_PUBLIC_API_BASE_URL || "";
@@ -24,6 +30,22 @@ export default function DashboardPage() {
       .then(() => setApiStatus("Online"))
       .catch(() => setApiStatus("Offline"));
   }, []);
+
+  // Fetch Amazon connection status once the API base is known.
+  useEffect(() => {
+    if (!apiBase) {
+      setAmazonStatus({ loading: false, connected: false, selling_partner_id: null });
+      return;
+    }
+    fetch(`${apiBase}/api/integrations/amazon/status?tenant=dev`)
+      .then((r) => r.ok ? r.json() : Promise.reject(new Error("Status failed")))
+      .then((data) => setAmazonStatus({
+        loading: false,
+        connected: !!data.connected,
+        selling_partner_id: data.selling_partner_id || null,
+      }))
+      .catch(() => setAmazonStatus({ loading: false, connected: false, selling_partner_id: null }));
+  }, [apiBase]);
 
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: "#f7f7fb" }}>
@@ -87,9 +109,27 @@ export default function DashboardPage() {
 
           <Panel title="Connections">
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
+              {/* Amazon — live status from API */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div><b>Amazon</b></div>
-                <div style={{ color: "#999" }}>Not connected</div>
+                {amazonStatus.loading ? (
+                  <span style={{ color: "#999", fontSize: 13 }}>Checking…</span>
+                ) : amazonStatus.connected ? (
+                  <div style={{ textAlign: "right" }}>
+                    <span style={{
+                      background: "#d1fae5", color: "#065f46",
+                      padding: "2px 10px", borderRadius: 12,
+                      fontSize: 13, fontWeight: 700,
+                    }}>✓ Connected</span>
+                    {amazonStatus.selling_partner_id && (
+                      <div style={{ fontSize: 11, color: "#666", marginTop: 2 }}>
+                        {amazonStatus.selling_partner_id}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <ConnectAmazonButton />
+                )}
               </div>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <div><b>Shopify</b></div>
@@ -102,9 +142,6 @@ export default function DashboardPage() {
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <div><b>eBay</b></div>
                 <div style={{ color: "#999" }}>Later</div>
-              </div>
-              <div style={{ fontSize: 12, color: "#777" }}>
-                This panel will reflect real status once we wire it to the API.
               </div>
             </div>
           </Panel>

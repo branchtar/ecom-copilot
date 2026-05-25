@@ -221,6 +221,17 @@ class AmazonConnectionStore(ABC):
     @abstractmethod
     def has_connection(self, *, tenant: str, selling_partner_id: str) -> bool: ...
 
+    @abstractmethod
+    def get_connection_meta(self, *, tenant: str) -> Optional[dict]:
+        """
+        Returns safe metadata for the most recent connection for this tenant,
+        or None if no connection exists.
+
+        Safe fields only: selling_partner_id, tenant, obtained_at.
+        MUST NEVER return access_token, refresh_token, or any secret value.
+        """
+        ...
+
 
 # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 # NOT PRODUCTION-DURABLE.
@@ -339,11 +350,22 @@ class LocalEncryptedJsonAmazonConnectionStore(AmazonConnectionStore):
             "encrypted_payload": ciphertext,
             "updated_at": now,
         }
+        # Safe metadata for the status endpoint — no token values stored here.
+        obj.setdefault("tenant_meta", {})
+        obj["tenant_meta"][tenant] = {
+            "selling_partner_id": selling_partner_id,
+            "tenant": tenant,
+            "obtained_at": now,
+        }
         self._write(obj)
 
     def has_connection(self, *, tenant: str, selling_partner_id: str) -> bool:
         obj = self._load()
         return self._key(tenant, selling_partner_id) in obj["connections"]
+
+    def get_connection_meta(self, *, tenant: str) -> Optional[dict]:
+        obj = self._load()
+        return (obj.get("tenant_meta") or {}).get(tenant)
 
 
 class SecretsManagerAmazonConnectionStore(AmazonConnectionStore):
@@ -408,6 +430,10 @@ class SecretsManagerAmazonConnectionStore(AmazonConnectionStore):
     def _secret_name(self, tenant: str, selling_partner_id: str) -> str:
         return f"{self._prefix}/{tenant}/{selling_partner_id}"
 
+    def _meta_secret_name(self, tenant: str) -> str:
+        # Fixed path per tenant — holds safe metadata only (no tokens).
+        return f"{self._prefix}/{tenant}/_meta"
+
     # -- AmazonConnectionStore interface -------------------------------------
 
     def save_connection(
@@ -467,6 +493,37 @@ class SecretsManagerAmazonConnectionStore(AmazonConnectionStore):
                 "Could not save connection to Secrets Manager"
             ) from exc
 
+        # Write safe metadata for the status endpoint — no token values.
+        # Non-fatal: the token secret is already saved; meta failure is a warning.
+        meta_name = self._meta_secret_name(tenant)
+        meta_payload = json.dumps({
+            "selling_partner_id": selling_partner_id,
+            "tenant": tenant,
+            "obtained_at": now,
+        })
+        try:
+            try:
+                self._client.create_secret(
+                    Name=meta_name,
+                    SecretString=meta_payload,
+                    Description=(
+                        f"Amazon connection metadata (tenant={tenant}) — non-sensitive"
+                    ),
+                )
+            except self._client.exceptions.ResourceExistsException:
+                self._client.put_secret_value(
+                    SecretId=meta_name,
+                    SecretString=meta_payload,
+                )
+        except Exception:
+            # Swallow — status endpoint may show stale data but OAuth still succeeded.
+            logger.warning(
+                "Secrets Manager meta write failed (tenant=%s selling_partner_id=%s)"
+                " — status endpoint may be stale",
+                tenant,
+                selling_partner_id,
+            )
+
     def has_connection(self, *, tenant: str, selling_partner_id: str) -> bool:
         """
         Uses DescribeSecret (metadata only) — does NOT retrieve the secret
@@ -486,6 +543,32 @@ class SecretsManagerAmazonConnectionStore(AmazonConnectionStore):
             )
             raise ConnectionStorageError(
                 "Could not check connection in Secrets Manager"
+            ) from exc
+
+    def get_connection_meta(self, *, tenant: str) -> Optional[dict]:
+        """
+        Reads the safe metadata secret for this tenant.
+        Returns {selling_partner_id, tenant, obtained_at} or None.
+        Does NOT read the token secret — no access_token or refresh_token is fetched.
+        """
+        name = self._meta_secret_name(tenant)
+        try:
+            resp = self._client.get_secret_value(SecretId=name)
+            data = json.loads(resp["SecretString"])
+            # Return only the declared safe fields — guard against future drift.
+            return {
+                "selling_partner_id": data.get("selling_partner_id"),
+                "tenant": data.get("tenant", tenant),
+                "obtained_at": data.get("obtained_at"),
+            }
+        except self._client.exceptions.ResourceNotFoundException:
+            return None
+        except Exception as exc:
+            logger.warning(
+                "Secrets Manager get_connection_meta failed (tenant=%s)", tenant
+            )
+            raise ConnectionStorageError(
+                "Could not read connection metadata from Secrets Manager"
             ) from exc
 
 
