@@ -17,7 +17,7 @@ export default function DashboardPage() {
   });
 
   useEffect(() => {
-    const base = process.env.NEXT_PUBLIC_API_BASE_URL || "";
+    const base = process.env.NEXT_PUBLIC_API_BASE_URL || "https://5xhzibtfry.us-east-1.awsapprunner.com";
     setApiBase(base);
 
     if (!base) {

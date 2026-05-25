@@ -7,7 +7,7 @@ export default function ConnectAmazonButton() {
 
   const onClick = async () => {
     try {
-      const base = process.env.NEXT_PUBLIC_API_BASE_URL;
+      const base = process.env.NEXT_PUBLIC_API_BASE_URL || "https://5xhzibtfry.us-east-1.awsapprunner.com";
       if (!base) throw new Error("NEXT_PUBLIC_API_BASE_URL not set");
 
       // Start OAuth flow by asking API for authorize_url
