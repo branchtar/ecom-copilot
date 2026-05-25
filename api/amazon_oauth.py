@@ -346,13 +346,164 @@ class LocalEncryptedJsonAmazonConnectionStore(AmazonConnectionStore):
         return self._key(tenant, selling_partner_id) in obj["connections"]
 
 
+class SecretsManagerAmazonConnectionStore(AmazonConnectionStore):
+    """
+    Production store. Each seller connection is persisted as a single
+    AWS Secrets Manager secret, encrypted at rest by the AWS-managed
+    KMS key (aws/secretsmanager) — no Fernet key required.
+
+    Secret naming:
+        {AMAZON_SECRETS_PREFIX}/{tenant}/{selling_partner_id}
+    Default prefix:
+        ecom-copilot/amazon
+    Example:
+        ecom-copilot/amazon/dev/AXXXXXXXXXXXXX
+
+    The secret value is a JSON string containing the token bundle.
+    IMPORTANT: Never log the secret value, access token, or refresh token.
+
+    Required App Runner instance-role permissions (scoped to prefix):
+        secretsmanager:CreateSecret
+        secretsmanager:PutSecretValue
+        secretsmanager:GetSecretValue
+        secretsmanager:DescribeSecret
+        secretsmanager:TagResource
+    Resource ARN pattern:
+        arn:aws:secretsmanager:{region}:{account}:secret:{prefix}/*
+    """
+
+    def __init__(self, *, client: object, prefix: str) -> None:
+        self._client = client
+        self._prefix = prefix.rstrip("/")
+
+    @classmethod
+    def from_env(cls) -> "SecretsManagerAmazonConnectionStore":
+        # Lazy import: boto3 is only required when this backend is active.
+        # Local dev using AMAZON_CONNECTION_STORE=local never touches boto3.
+        try:
+            import boto3  # type: ignore[import]
+        except ImportError as exc:
+            raise MissingConfigError(
+                "boto3 is not installed. Add boto3 to api/requirements.txt."
+            ) from exc
+
+        prefix = (
+            (os.getenv("AMAZON_SECRETS_PREFIX") or "ecom-copilot/amazon")
+            .strip()
+            .rstrip("/")
+        )
+        # App Runner injects AWS_DEFAULT_REGION automatically when an
+        # instance role is attached. Fall back to AWS_REGION, then us-east-1.
+        region = (
+            os.getenv("AWS_DEFAULT_REGION")
+            or os.getenv("AWS_REGION")
+            or "us-east-1"
+        ).strip()
+
+        client = boto3.client("secretsmanager", region_name=region)
+        return cls(client=client, prefix=prefix)
+
+    # -- internals -----------------------------------------------------------
+
+    def _secret_name(self, tenant: str, selling_partner_id: str) -> str:
+        return f"{self._prefix}/{tenant}/{selling_partner_id}"
+
+    # -- AmazonConnectionStore interface -------------------------------------
+
+    def save_connection(
+        self,
+        *,
+        tenant: str,
+        selling_partner_id: str,
+        access_token: str,
+        refresh_token: str,
+        token_type: str,
+        expires_in: int,
+    ) -> None:
+        name = self._secret_name(tenant, selling_partner_id)
+        now = int(time.time())
+        # Token bundle stored as the Secrets Manager secret value.
+        # Secrets Manager encrypts this with the aws/secretsmanager KMS key.
+        # IMPORTANT: never log this payload.
+        payload = json.dumps(
+            {
+                "access_token": access_token,
+                "refresh_token": refresh_token,
+                "token_type": token_type,
+                "expires_in": int(expires_in),
+                "obtained_at": now,
+                "tenant": tenant,
+                "selling_partner_id": selling_partner_id,
+            }
+        )
+        try:
+            try:
+                self._client.create_secret(
+                    Name=name,
+                    SecretString=payload,
+                    Description=f"Amazon SP-API seller connection (tenant={tenant})",
+                    Tags=[
+                        {"Key": "app", "Value": "ecom-copilot"},
+                        {"Key": "tenant", "Value": tenant},
+                        {"Key": "selling_partner_id", "Value": selling_partner_id},
+                    ],
+                )
+            except self._client.exceptions.ResourceExistsException:
+                # Secret already exists from a previous OAuth — update it in place.
+                self._client.put_secret_value(
+                    SecretId=name,
+                    SecretString=payload,
+                )
+        except ConnectionStorageError:
+            raise
+        except Exception as exc:
+            # Log tenant/spid only — never the payload.
+            logger.error(
+                "Secrets Manager save_connection failed (tenant=%s selling_partner_id=%s)",
+                tenant,
+                selling_partner_id,
+            )
+            raise ConnectionStorageError(
+                "Could not save connection to Secrets Manager"
+            ) from exc
+
+    def has_connection(self, *, tenant: str, selling_partner_id: str) -> bool:
+        """
+        Uses DescribeSecret (metadata only) — does NOT retrieve the secret
+        value, so no token data is read from Secrets Manager just for a check.
+        """
+        name = self._secret_name(tenant, selling_partner_id)
+        try:
+            self._client.describe_secret(SecretId=name)
+            return True
+        except self._client.exceptions.ResourceNotFoundException:
+            return False
+        except Exception as exc:
+            logger.warning(
+                "Secrets Manager has_connection check failed (tenant=%s selling_partner_id=%s)",
+                tenant,
+                selling_partner_id,
+            )
+            raise ConnectionStorageError(
+                "Could not check connection in Secrets Manager"
+            ) from exc
+
+
 def get_connection_store() -> AmazonConnectionStore:
     """
-    Factory hook. For now always returns the local dev store. When a durable
-    backend is added (DynamoDB, Secrets Manager, etc.), branch here on an env
-    var like AMAZON_CONNECTION_STORE=local|dynamodb so the rest of the code
-    does not change.
+    Factory. Selects the storage backend from the AMAZON_CONNECTION_STORE
+    environment variable:
+
+        local            — LocalEncryptedJsonAmazonConnectionStore (dev only,
+                           ephemeral on App Runner — NOT production-durable)
+        secretsmanager   — SecretsManagerAmazonConnectionStore (production)
+
+    Defaults to 'local' so local development works without AWS credentials.
+    Set AMAZON_CONNECTION_STORE=secretsmanager in App Runner env vars.
     """
+    backend = (os.getenv("AMAZON_CONNECTION_STORE") or "local").strip().lower()
+    if backend == "secretsmanager":
+        return SecretsManagerAmazonConnectionStore.from_env()
     return LocalEncryptedJsonAmazonConnectionStore.from_env()
 
 
