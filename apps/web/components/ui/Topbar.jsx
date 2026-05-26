@@ -7,56 +7,74 @@ export default function Topbar() {
       alignItems: "center",
       justifyContent: "space-between",
       gap: 12,
-      padding: "14px 16px",
-      border: "1px solid #e8e8e8",
-      borderRadius: 18,
-      background: "#ffffff",
+      padding: "10px 14px",
+      border: "1px solid var(--ec-border)",
+      borderRadius: "var(--ec-radius)",
+      background: "var(--ec-surface)",
+      boxShadow: "var(--ec-shadow-xs)",
       position: "sticky",
       top: 12,
-      zIndex: 10
+      zIndex: 10,
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1 }}>
         <input
-          placeholder="Search SKU / UPC / ASIN / Supplier item..."
+          placeholder="Search SKU / UPC / ASIN / Supplier item…"
           style={{
             width: "100%",
-            padding: "12px 14px",
-            borderRadius: 16,
-            border: "1px solid #ddd",
-            outline: "none"
+            padding: "9px 14px",
+            borderRadius: "var(--ec-radius-sm)",
+            border: "1px solid var(--ec-border)",
+            background: "var(--ec-border-light)",
+            outline: "none",
+            fontSize: 14,
+            color: "var(--ec-text)",
           }}
         />
       </div>
 
-      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <button style={{
-          padding: "10px 14px",
-          borderRadius: 16,
-          border: "1px solid #ddd",
-          background: "#fff",
-          cursor: "pointer"
+          padding: "9px 14px",
+          borderRadius: "var(--ec-radius-sm)",
+          border: "1px solid var(--ec-border)",
+          background: "var(--ec-surface)",
+          cursor: "pointer",
+          fontSize: 13,
+          fontWeight: 500,
+          color: "var(--ec-text)",
+          whiteSpace: "nowrap",
         }}>
           + Import Feed
         </button>
 
         <button style={{
-          padding: "10px 14px",
-          borderRadius: 16,
-          border: "1px solid #ddd",
-          background: "#fff",
-          cursor: "pointer"
+          padding: "9px 14px",
+          borderRadius: "var(--ec-radius-sm)",
+          border: "1px solid var(--ec-border)",
+          background: "var(--ec-surface)",
+          cursor: "pointer",
+          fontSize: 13,
+          fontWeight: 500,
+          color: "var(--ec-text)",
+          whiteSpace: "nowrap",
         }}>
           Run Report
         </button>
 
         <div style={{
-          width: 38, height: 38, borderRadius: 16,
-          border: "1px solid #ddd",
+          width: 36,
+          height: 36,
+          borderRadius: "var(--ec-radius-sm)",
+          background: "#111827",
+          color: "#ffffff",
           display: "grid",
           placeItems: "center",
-          fontWeight: 800
+          fontWeight: 700,
+          fontSize: 12,
+          letterSpacing: "0.05em",
+          flexShrink: 0,
         }}>
-          K
+          KM
         </div>
       </div>
     </header>
