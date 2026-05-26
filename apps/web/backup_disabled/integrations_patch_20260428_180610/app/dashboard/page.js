@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useState } from "react";
 import Sidebar from "../../components/ui/Sidebar";
@@ -74,13 +74,13 @@ export default function DashboardPage() {
           gap: 12
         }}>
           <Panel
-            title="Todayâ€™s Focus"
+            title="Today’s Focus"
             right={<button style={{ padding: "10px 14px", borderRadius: 16, border: "1px solid #ddd", background: "#fff", cursor: "pointer" }}>Open Tasks</button>}
           >
             <ul style={{ margin: 0, paddingLeft: 18, color: "#333" }}>
-              <li>Import supplier feed(s) â†’ normalize UPC/SKU â†’ dedupe</li>
-              <li>Run profitability scan â†’ create â€œWorth Listingâ€ queue</li>
-              <li>Push pricing rules â†’ publish to marketplaces</li>
+              <li>Import supplier feed(s) → normalize UPC/SKU → dedupe</li>
+              <li>Run profitability scan → create “Worth Listing” queue</li>
+              <li>Push pricing rules → publish to marketplaces</li>
               <li>Review alerts: buy box, low stock, stranded inventory</li>
             </ul>
           </Panel>
@@ -103,24 +103,6 @@ export default function DashboardPage() {
                 <div><b>eBay</b></div>
                 <div style={{ color: "#999" }}>Later</div>
               </div>
-              <a
-                href="/dashboard/settings/integrations"
-                style={{
-                  display: "inline-block",
-                  marginTop: 6,
-                  padding: "10px 14px",
-                  borderRadius: 16,
-                  border: "1px solid #ddd",
-                  background: "#fff",
-                  color: "#111",
-                  textDecoration: "none",
-                  fontWeight: 700,
-                  textAlign: "center",
-                }}
-              >
-                Manage Integrations
-              </a>
-
               <div style={{ fontSize: 12, color: "#777" }}>
                 This panel will reflect real status once we wire it to the API.
               </div>
