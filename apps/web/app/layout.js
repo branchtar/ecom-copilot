@@ -11,7 +11,7 @@ export default function RootLayout({ children }) {
     <html lang="en">
       <body style={{ fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial", margin: 0 }}>
         <Providers>
-          <div style={{ maxWidth: 980, margin: "0 auto", padding: 24 }}>
+          <div style={{ maxWidth: 1440, margin: "0 auto" }}>
             {children}
           </div>
         </Providers>

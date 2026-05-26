@@ -7,9 +7,210 @@ import KpiCard from "../../components/ui/KpiCard";
 import Panel from "../../components/ui/Panel";
 import ConnectAmazonButton from "../../components/ConnectAmazonButton";
 
-// ---------------------------------------------------------------------------
-// Shared card shell for marketplace connection cards
-// ---------------------------------------------------------------------------
+// ─────────────────────────────────────────────────────────────────────────────
+// Mock data — replace with real API endpoints when ready
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SPARKLINES = {
+  sales:    [38400,41200,39800,42600,44100,43200,47800,45500,49200,51800,48100,52900,54400,55800],
+  profit:   [7200, 6800, 7400, 8100, 7600, 8400, 7900, 8700, 9100, 8500, 9300, 9800,10200,10800],
+  orders:   [142,  156,  148,  165,  158,  172,  168,  179,  185,  177,  191,  186,  198,  204],
+  listings: [1840,1852, 1867, 1879, 1892, 1905, 1911, 1923, 1935, 1942, 1948, 1962, 1974, 1982],
+};
+
+const REVENUE_DATA = [28400,31200,29800,35600,32100,38200,41800,39500,44200,47800,45100,48900,52400,55800];
+
+const ACTIVITIES = [
+  { time: "2m",  icon: "✓", iconColor: "var(--ec-success)",      text: "Amazon order #112-4892 fulfilled" },
+  { time: "14m", icon: "↑", iconColor: "var(--ec-success)",      text: "LPD Music — 9,214 SKUs imported" },
+  { time: "1h",  icon: "✓", iconColor: "var(--ec-success)",      text: "Repricer job — 847 prices updated" },
+  { time: "2h",  icon: "!",  iconColor: "var(--ec-caution)",     text: "Buy box lost on 3 ASINs" },
+  { time: "3h",  icon: "→", iconColor: "var(--ec-text-subtle)",  text: "Ensoul catalog sync started" },
+  { time: "5h",  icon: "↑", iconColor: "var(--ec-success)",      text: "Vernon Sales feed refreshed" },
+];
+
+const ALERTS = [
+  { text: "12 SKUs below min net threshold", sev: "danger" },
+  { text: "6 listings missing images",       sev: "caution" },
+  { text: "3 products low stock (FBA)",      sev: "caution" },
+  { text: "2 repricer jobs failed",          sev: "danger" },
+  { text: "Buy box lost — 3 ASINs",          sev: "caution" },
+  { text: "Import supplier feed(s)",         sev: "task" },
+  { text: "Run profitability scan",          sev: "task" },
+];
+
+const OPS_METRICS = [
+  { label: "Avg. Margin",    value: "18.5%", delta: "+0.8%", up: true  },
+  { label: "Buy Box Rate",   value: "74%",   delta: "-2%",   up: false },
+  { label: "FBA In Stock",   value: "1,204", delta: "+67",   up: true  },
+  { label: "Pending Orders", value: "23",    delta: "",      up: null  },
+  { label: "Open Alerts",    value: "8",     delta: "-3",    up: true  },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SVG Revenue Trend Chart (inline — no library)
+// ─────────────────────────────────────────────────────────────────────────────
+function RevenueTrendChart() {
+  const W = 400, H = 90;
+  const min = Math.min(...REVENUE_DATA) * 0.93;
+  const max = Math.max(...REVENUE_DATA) * 1.05;
+  const range = max - min;
+
+  const pts = REVENUE_DATA.map((v, i) => [
+    (i / (REVENUE_DATA.length - 1)) * W,
+    H - ((v - min) / range) * H,
+  ]);
+
+  const linePts = pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+  const areaPts = [
+    `0,${H}`,
+    ...pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`),
+    `${W},${H}`,
+  ].join(" ");
+
+  return (
+    <div style={{ marginTop: 4 }}>
+      {/* Summary line */}
+      <div style={{ display: "flex", gap: 18, fontSize: 12, color: "var(--ec-text-muted)", marginBottom: 10 }}>
+        <span>
+          <span style={{ fontWeight: 800, color: "var(--ec-text)", fontSize: 16 }}>$55,800</span>
+          {" "}today
+        </span>
+        <span style={{ color: "var(--ec-success)", fontWeight: 600 }}>↑ +4.2% vs prior period</span>
+      </div>
+
+      {/* Chart */}
+      <svg
+        width="100%" height={H}
+        viewBox={`0 0 ${W} ${H}`}
+        preserveAspectRatio="none"
+        style={{ display: "block" }}
+      >
+        <defs>
+          <linearGradient id="rev-grad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"   stopColor="#059669" stopOpacity="0.18" />
+            <stop offset="100%" stopColor="#059669" stopOpacity="0"    />
+          </linearGradient>
+        </defs>
+        {/* Grid lines */}
+        {[0.25, 0.5, 0.75].map((f) => (
+          <line key={f}
+            x1={0} y1={H * (1 - f)}
+            x2={W} y2={H * (1 - f)}
+            stroke="#f3f4f6" strokeWidth="1"
+          />
+        ))}
+        <polygon points={areaPts} fill="url(#rev-grad)" />
+        <polyline
+          points={linePts}
+          fill="none"
+          stroke="#059669"
+          strokeWidth="2.5"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+        {/* End dot */}
+        <circle
+          cx={pts[pts.length - 1][0]}
+          cy={pts[pts.length - 1][1]}
+          r="4" fill="#059669"
+        />
+      </svg>
+
+      {/* X-axis labels */}
+      <div style={{
+        display: "flex", justifyContent: "space-between",
+        marginTop: 6, fontSize: 10, color: "var(--ec-text-subtle)",
+      }}>
+        {["Dec 10", "Dec 12", "Dec 15", "Dec 18", "Dec 20", "Dec 23"].map((l) => (
+          <span key={l}>{l}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SVG Donut Chart — marketplace revenue split (inline — no library)
+// strokeDashoffset trick: positive offset skips that many units before drawing,
+// effectively positioning each segment after the previous one.
+// ─────────────────────────────────────────────────────────────────────────────
+function DonutChart() {
+  const cx = 60, cy = 60, r = 42, sw = 13;
+  const circ = 2 * Math.PI * r; // ≈ 263.9
+
+  const segments = [
+    { label: "Amazon",  pct: 72, color: "#FF9900" },
+    { label: "Shopify", pct: 28, color: "#96BF48" },
+  ];
+
+  let cumArc = 0;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
+      <svg width={120} height={120} viewBox="0 0 120 120">
+        {/* Track */}
+        <circle
+          cx={cx} cy={cy} r={r}
+          fill="none"
+          stroke="var(--ec-border-light)"
+          strokeWidth={sw}
+        />
+        {segments.map((seg) => {
+          const arc = (seg.pct / 100) * circ - 1.5; // subtract gap
+          const offset = cumArc;
+          cumArc += (seg.pct / 100) * circ;
+          return (
+            <circle
+              key={seg.label}
+              cx={cx} cy={cy} r={r}
+              fill="none"
+              stroke={seg.color}
+              strokeWidth={sw}
+              strokeDasharray={`${arc.toFixed(2)} ${circ.toFixed(2)}`}
+              strokeDashoffset={offset.toFixed(2)}
+              transform={`rotate(-90 ${cx} ${cy})`}
+              strokeLinecap="butt"
+            />
+          );
+        })}
+        {/* Center label */}
+        <text x={cx} y={cy - 4}  textAnchor="middle" fontSize="14" fontWeight="700" fill="#111827">72%</text>
+        <text x={cx} y={cy + 13} textAnchor="middle" fontSize="9"  fill="#6b7280">Amazon</text>
+      </svg>
+
+      {/* Legend */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%", maxWidth: 160 }}>
+        {segments.map((seg) => (
+          <div key={seg.label} style={{
+            display: "flex", alignItems: "center",
+            justifyContent: "space-between", fontSize: 12,
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+              <div style={{
+                width: 9, height: 9, borderRadius: 2,
+                background: seg.color, flexShrink: 0,
+              }} />
+              <span style={{ color: "var(--ec-text-muted)" }}>{seg.label}</span>
+            </div>
+            <span style={{ fontWeight: 700, color: "var(--ec-text)" }}>{seg.pct}%</span>
+          </div>
+        ))}
+        <div style={{
+          borderTop: "1px solid var(--ec-border)",
+          paddingTop: 8, marginTop: 2,
+          fontSize: 11, color: "var(--ec-text-subtle)",
+        }}>
+          Revenue split · last 14 days
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Marketplace connection card
+// ─────────────────────────────────────────────────────────────────────────────
 function MarketplaceCard({ iconBg, iconLetter, name, sub, statusBadge, children, faded }) {
   return (
     <div style={{
@@ -18,18 +219,15 @@ function MarketplaceCard({ iconBg, iconLetter, name, sub, statusBadge, children,
       padding: "16px 18px",
       background: "var(--ec-surface)",
       boxShadow: "var(--ec-shadow-sm)",
-      display: "flex",
-      flexDirection: "column",
-      gap: 12,
-      opacity: faded ? 0.65 : 1,
+      display: "flex", flexDirection: "column", gap: 12,
+      opacity: faded ? 0.6 : 1,
     }}>
-      {/* Top row: icon + name + status */}
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <div style={{
           width: 38, height: 38, borderRadius: "var(--ec-radius-sm)",
-          background: iconBg,
+          background: iconBg, color: "#fff",
+          fontWeight: 800, fontSize: 16, flexShrink: 0,
           display: "flex", alignItems: "center", justifyContent: "center",
-          color: "#fff", fontWeight: 800, fontSize: 17, flexShrink: 0,
         }}>
           {iconLetter}
         </div>
@@ -39,25 +237,24 @@ function MarketplaceCard({ iconBg, iconLetter, name, sub, statusBadge, children,
         </div>
         {statusBadge}
       </div>
-      {/* Slot for seller ID, connect button, etc. */}
       {children}
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Dashboard
-// ---------------------------------------------------------------------------
+// ─────────────────────────────────────────────────────────────────────────────
+// Dashboard page
+// ─────────────────────────────────────────────────────────────────────────────
 export default function DashboardPage() {
   const [apiStatus, setApiStatus] = useState("Checking...");
-  const [apiBase, setApiBase] = useState("");
+  const [apiBase, setApiBase]     = useState("");
   const [amazonStatus, setAmazonStatus] = useState({
     loading: true,
     connected: false,
     selling_partner_id: null,
   });
 
-  // Health check — preserve existing logic exactly
+  // ── Health check — logic preserved exactly ───────────────────────────────
   useEffect(() => {
     const base = process.env.NEXT_PUBLIC_API_BASE_URL || "https://5xhzibtfry.us-east-1.awsapprunner.com";
     setApiBase(base);
@@ -73,7 +270,7 @@ export default function DashboardPage() {
       .catch(() => setApiStatus("Offline"));
   }, []);
 
-  // Amazon connection status — preserve existing logic exactly
+  // ── Amazon connection status — logic preserved exactly ───────────────────
   useEffect(() => {
     if (!apiBase) {
       setAmazonStatus({ loading: false, connected: false, selling_partner_id: null });
@@ -89,17 +286,18 @@ export default function DashboardPage() {
       .catch(() => setAmazonStatus({ loading: false, connected: false, selling_partner_id: null }));
   }, [apiBase]);
 
-  // API status pill color
+  // ── Derived style values ─────────────────────────────────────────────────
   const dotColor =
     apiStatus === "Online"  ? "var(--ec-success)" :
     apiStatus === "Offline" ? "var(--ec-danger)"  :
     "var(--ec-text-subtle)";
+
   const pillTextColor =
     apiStatus === "Online"  ? "var(--ec-success)" :
     apiStatus === "Offline" ? "var(--ec-danger)"  :
     "var(--ec-text-muted)";
 
-  // Amazon status badge
+  // ── Status badges ────────────────────────────────────────────────────────
   const amazonBadge = amazonStatus.loading ? (
     <span style={{ fontSize: 12, color: "var(--ec-text-subtle)", flexShrink: 0 }}>Checking…</span>
   ) : amazonStatus.connected ? (
@@ -122,7 +320,6 @@ export default function DashboardPage() {
     </div>
   );
 
-  // Reusable "coming soon" badge
   const comingSoonBadge = (
     <div style={{
       fontSize: 12, color: "var(--ec-text-subtle)",
@@ -133,7 +330,6 @@ export default function DashboardPage() {
     </div>
   );
 
-  // Reusable "not connected" badge for non-live integrations
   const notConnectedBadge = (
     <div style={{
       fontSize: 12, color: "var(--ec-text-subtle)",
@@ -144,14 +340,15 @@ export default function DashboardPage() {
     </div>
   );
 
+  // ── Render ───────────────────────────────────────────────────────────────
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: "var(--ec-bg)" }}>
       <Sidebar />
 
-      <div style={{ flex: 1, padding: 20, minWidth: 0, overflowX: "hidden" }}>
+      <div style={{ flex: 1, padding: "16px 24px 40px", minWidth: 0, overflowX: "hidden" }}>
         <Topbar />
 
-        {/* ── Page header ────────────────────────────────────────────── */}
+        {/* ── Page header ────────────────────────────────────────────────── */}
         <div style={{
           marginTop: 20,
           display: "flex",
@@ -172,76 +369,91 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* API status pill — clean, no raw URL */}
-          <div style={{
-            display: "flex", alignItems: "center", gap: 7,
-            padding: "7px 13px",
-            borderRadius: 999,
-            border: "1px solid var(--ec-border)",
-            background: "var(--ec-surface)",
-            boxShadow: "var(--ec-shadow-xs)",
-            fontSize: 13, fontWeight: 500,
-            color: pillTextColor,
-            flexShrink: 0,
-            whiteSpace: "nowrap",
-          }}>
+          {/* Date range + API status pill */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <div style={{
-              width: 7, height: 7, borderRadius: "50%",
-              background: dotColor, flexShrink: 0,
-            }} />
-            API {apiStatus}
+              padding: "7px 13px",
+              borderRadius: "var(--ec-radius-sm)",
+              border: "1px solid var(--ec-border)",
+              background: "var(--ec-surface)",
+              boxShadow: "var(--ec-shadow-xs)",
+              fontSize: 12, fontWeight: 500,
+              color: "var(--ec-text-muted)",
+              whiteSpace: "nowrap",
+            }}>
+              Dec 10 – Dec 23, 2025
+            </div>
+
+            <div style={{
+              display: "flex", alignItems: "center", gap: 7,
+              padding: "7px 13px",
+              borderRadius: 999,
+              border: "1px solid var(--ec-border)",
+              background: "var(--ec-surface)",
+              boxShadow: "var(--ec-shadow-xs)",
+              fontSize: 13, fontWeight: 500,
+              color: pillTextColor,
+              flexShrink: 0, whiteSpace: "nowrap",
+            }}>
+              <div style={{
+                width: 7, height: 7, borderRadius: "50%",
+                background: dotColor, flexShrink: 0,
+              }} />
+              API {apiStatus}
+            </div>
           </div>
         </div>
 
-        {/* ── KPI grid — auto-fit for responsiveness ──────────────────── */}
+        {/* ── KPI cards with sparklines ───────────────────────────────────── */}
         <div style={{
-          marginTop: 20,
+          marginTop: 16,
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
-          gap: 14,
+          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+          gap: 12,
         }}>
-          <KpiCard title="Gross Sales"      value="$12,480" sub="Last 30 days"      trend="+4.2%" />
-          <KpiCard title="Net Profit"       value="$2,310"  sub="Est. after fees"   trend="+2.1%" />
-          <KpiCard title="Orders"           value="186"     sub="All channels"       trend="+8"    />
-          <KpiCard title="Active Listings"  value="1,942"   sub="Amazon + Shopify"  trend="+31"   />
+          <KpiCard
+            title="Gross Sales"    value="$55,800" sub="Last 14 days"
+            trend="+4.2%"         sparkline={SPARKLINES.sales}
+          />
+          <KpiCard
+            title="Net Profit"    value="$10,800" sub="Est. after fees"
+            trend="+2.1%"         sparkline={SPARKLINES.profit}
+          />
+          <KpiCard
+            title="Orders"        value="204"     sub="All channels"
+            trend="+8"            sparkline={SPARKLINES.orders}
+          />
+          <KpiCard
+            title="Active Listings" value="1,982" sub="Amazon + Shopify"
+            trend="+31"           sparkline={SPARKLINES.listings}
+          />
         </div>
 
-        {/* ── Today's Focus ───────────────────────────────────────────── */}
-        <div style={{ marginTop: 14 }}>
-          <Panel
-            title="Today's Focus"
-            right={
-              <button style={{
-                padding: "7px 14px",
-                borderRadius: "var(--ec-radius-sm)",
-                border: "1px solid var(--ec-border)",
-                background: "var(--ec-surface)",
-                cursor: "pointer",
-                fontSize: 13,
-                fontWeight: 500,
-                color: "var(--ec-text)",
-              }}>
-                Open Tasks
-              </button>
-            }
-          >
-            <ul style={{ margin: 0, paddingLeft: 18, color: "var(--ec-text)", fontSize: 14, lineHeight: 1.85 }}>
-              <li>Import supplier feed(s) → normalize UPC/SKU → dedupe</li>
-              <li>Run profitability scan → create "Worth Listing" queue</li>
-              <li>Push pricing rules → publish to marketplaces</li>
-              <li>Review alerts: buy box, low stock, stranded inventory</li>
-            </ul>
+        {/* ── Charts row: Revenue Trend + Marketplace Split ───────────────── */}
+        <div style={{
+          marginTop: 12,
+          display: "grid",
+          gridTemplateColumns: "2fr 1fr",
+          gap: 12,
+        }}>
+          <Panel title="Revenue Trend">
+            <RevenueTrendChart />
+          </Panel>
+
+          <Panel title="Marketplace Split">
+            <DonutChart />
           </Panel>
         </div>
 
-        {/* ── Marketplace connections ──────────────────────────────────── */}
-        <div style={{ marginTop: 24 }}>
+        {/* ── Marketplace Connections ─────────────────────────────────────── */}
+        {/* id="marketplaces" — sidebar Amazon link scrolls here */}
+        <div id="marketplaces" style={{ marginTop: 24 }}>
           <div style={{
             fontSize: 11, fontWeight: 700,
             textTransform: "uppercase", letterSpacing: "0.08em",
             color: "var(--ec-text-muted)", marginBottom: 12,
           }}>
-            Marketplaces
+            Marketplace Connections
           </div>
 
           <div style={{
@@ -249,12 +461,10 @@ export default function DashboardPage() {
             gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
             gap: 12,
           }}>
-            {/* Amazon — live API status */}
+            {/* Amazon — live API status; ConnectAmazonButton OAuth preserved */}
             <MarketplaceCard
-              iconBg="#FF9900"
-              iconLetter="A"
-              name="Amazon"
-              sub="Seller Central"
+              iconBg="#FF9900" iconLetter="A"
+              name="Amazon" sub="Seller Central"
               statusBadge={amazonBadge}
             >
               {amazonStatus.connected && amazonStatus.selling_partner_id && (
@@ -265,9 +475,7 @@ export default function DashboardPage() {
                   background: "var(--ec-bg)",
                   borderRadius: "var(--ec-radius-xs)",
                   padding: "5px 9px",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                 }}>
                   ID: {amazonStatus.selling_partner_id}
                 </div>
@@ -277,92 +485,153 @@ export default function DashboardPage() {
               )}
             </MarketplaceCard>
 
-            {/* Shopify — not connected */}
             <MarketplaceCard
-              iconBg="#96BF48"
-              iconLetter="S"
-              name="Shopify"
-              sub="Online Store"
+              iconBg="#96BF48" iconLetter="S"
+              name="Shopify" sub="Online Store"
               statusBadge={notConnectedBadge}
             />
 
-            {/* Walmart — coming soon */}
             <MarketplaceCard
-              iconBg="#0071CE"
-              iconLetter="W"
-              name="Walmart"
-              sub="Marketplace"
+              iconBg="#0071CE" iconLetter="W"
+              name="Walmart" sub="Marketplace"
               statusBadge={comingSoonBadge}
               faded
             />
 
-            {/* eBay — coming soon */}
             <MarketplaceCard
-              iconBg="#E43137"
-              iconLetter="e"
-              name="eBay"
-              sub="Marketplace"
+              iconBg="#E43137" iconLetter="e"
+              name="eBay" sub="Marketplace"
               statusBadge={comingSoonBadge}
               faded
             />
           </div>
         </div>
 
-        {/* ── Supplier Pipeline + Alerts ──────────────────────────────── */}
+        {/* ── Supplier Pipeline | Recent Activity | Alerts & Tasks ─────────── */}
         <div style={{
-          marginTop: 14,
+          marginTop: 12,
           display: "grid",
-          gridTemplateColumns: "1fr 1fr",
+          gridTemplateColumns: "1fr 1fr 1fr",
           gap: 12,
         }}>
+          {/* Supplier Pipeline */}
           <Panel title="Supplier Pipeline">
             <div style={{
               display: "grid",
-              gridTemplateColumns: "1fr 64px 88px",
-              rowGap: 10,
-              columnGap: 10,
-              fontSize: 13,
+              gridTemplateColumns: "1fr 56px 76px",
+              rowGap: 10, columnGap: 8, fontSize: 13,
             }}>
-              {/* Header row */}
-              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--ec-text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Supplier</div>
-              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--ec-text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>SKUs</div>
-              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--ec-text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Status</div>
+              <div style={{ fontSize: 10, fontWeight: 600, color: "var(--ec-text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Supplier</div>
+              <div style={{ fontSize: 10, fontWeight: 600, color: "var(--ec-text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>SKUs</div>
+              <div style={{ fontSize: 10, fontWeight: 600, color: "var(--ec-text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Status</div>
 
-              {/* Rows */}
-              <div style={{ color: "var(--ec-text)" }}>Ensoul Music</div>
-              <div style={{ color: "var(--ec-text)" }}>12,840</div>
-              <div>
-                <span style={{ background: "var(--ec-success-bg)", color: "var(--ec-success-text)", padding: "2px 9px", borderRadius: 999, fontSize: 12, fontWeight: 600 }}>
-                  Ready
-                </span>
-              </div>
-
-              <div style={{ color: "var(--ec-text)" }}>LPD Music</div>
-              <div style={{ color: "var(--ec-text)" }}>9,214</div>
-              <div>
-                <span style={{ background: "var(--ec-caution-bg)", color: "var(--ec-caution)", padding: "2px 9px", borderRadius: 999, fontSize: 12, fontWeight: 600 }}>
-                  Queued
-                </span>
-              </div>
-
-              <div style={{ color: "var(--ec-text)" }}>Vernon Sales</div>
-              <div style={{ color: "var(--ec-text)" }}>4,110</div>
-              <div>
-                <span style={{ background: "var(--ec-border-light)", color: "var(--ec-text-muted)", padding: "2px 9px", borderRadius: 999, fontSize: 12, fontWeight: 600 }}>
-                  Scrape
-                </span>
-              </div>
+              {[
+                { name: "Ensoul Music", skus: "12,840", status: "Ready",   sev: "success" },
+                { name: "LPD Music",    skus: "9,214",  status: "Queued",  sev: "caution" },
+                { name: "Vernon Sales", skus: "4,110",  status: "Scrape",  sev: "neutral" },
+                { name: "Chesbro",      skus: "2,780",  status: "Pending", sev: "neutral" },
+              ].map((row) => {
+                const chipStyle =
+                  row.sev === "success" ? { background: "var(--ec-success-bg)", color: "var(--ec-success-text)" } :
+                  row.sev === "caution" ? { background: "var(--ec-caution-bg)", color: "var(--ec-caution)" } :
+                  { background: "var(--ec-border-light)", color: "var(--ec-text-muted)" };
+                return [
+                  <div key={`${row.name}-n`} style={{ color: "var(--ec-text)", fontSize: 13 }}>{row.name}</div>,
+                  <div key={`${row.name}-s`} style={{ color: "var(--ec-text)", fontSize: 13 }}>{row.skus}</div>,
+                  <div key={`${row.name}-st`}>
+                    <span style={{ padding: "2px 8px", borderRadius: 999, fontSize: 11, fontWeight: 600, ...chipStyle }}>
+                      {row.status}
+                    </span>
+                  </div>,
+                ];
+              })}
             </div>
           </Panel>
 
-          <Panel title="Alerts">
-            <ul style={{ margin: 0, paddingLeft: 18, color: "var(--ec-text)", fontSize: 14, lineHeight: 1.85 }}>
-              <li>12 SKUs below min net threshold</li>
-              <li>6 listings missing images</li>
-              <li>3 products low stock (FBA)</li>
-              <li>2 repricer jobs failed</li>
-            </ul>
+          {/* Recent Activity */}
+          <Panel title="Recent Activity">
+            <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
+              {ACTIVITIES.map((a, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                  <div style={{
+                    width: 22, height: 22, borderRadius: "50%",
+                    background: "var(--ec-border-light)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 11, fontWeight: 700,
+                    color: a.iconColor, flexShrink: 0,
+                  }}>
+                    {a.icon}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, color: "var(--ec-text)", lineHeight: 1.4 }}>{a.text}</div>
+                    <div style={{ fontSize: 11, color: "var(--ec-text-subtle)", marginTop: 2 }}>{a.time} ago</div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </Panel>
+
+          {/* Alerts & Tasks */}
+          <Panel title="Alerts & Tasks">
+            <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+              {ALERTS.map((a, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 9, fontSize: 12 }}>
+                  <div style={{
+                    width: 6, height: 6, borderRadius: "50%", marginTop: 4, flexShrink: 0,
+                    background:
+                      a.sev === "danger"  ? "var(--ec-danger)" :
+                      a.sev === "caution" ? "var(--ec-caution)" :
+                      "var(--ec-text-subtle)",
+                  }} />
+                  <div style={{ color: "var(--ec-text)", lineHeight: 1.45 }}>{a.text}</div>
+                </div>
+              ))}
+            </div>
+          </Panel>
+        </div>
+
+        {/* ── Ops metric strip ────────────────────────────────────────────── */}
+        <div style={{
+          marginTop: 12,
+          display: "grid",
+          gridTemplateColumns: "repeat(5, 1fr)",
+          gap: 10,
+        }}>
+          {OPS_METRICS.map((m) => (
+            <div key={m.label} style={{
+              border: "1px solid var(--ec-border)",
+              borderRadius: "var(--ec-radius-sm)",
+              padding: "12px 16px",
+              background: "var(--ec-surface)",
+              boxShadow: "var(--ec-shadow-xs)",
+            }}>
+              <div style={{
+                fontSize: 10, fontWeight: 600,
+                textTransform: "uppercase", letterSpacing: "0.07em",
+                color: "var(--ec-text-muted)",
+              }}>
+                {m.label}
+              </div>
+              <div style={{
+                fontSize: 22, fontWeight: 800,
+                letterSpacing: "-0.02em", marginTop: 6,
+                color: "var(--ec-text)", lineHeight: 1,
+              }}>
+                {m.value}
+              </div>
+              {m.delta ? (
+                <div style={{
+                  fontSize: 11, fontWeight: 600, marginTop: 4,
+                  color:
+                    m.up === true  ? "var(--ec-success)" :
+                    m.up === false ? "var(--ec-danger)"  :
+                    "var(--ec-text-subtle)",
+                }}>
+                  {m.delta}
+                </div>
+              ) : null}
+            </div>
+          ))}
         </div>
       </div>
     </div>
