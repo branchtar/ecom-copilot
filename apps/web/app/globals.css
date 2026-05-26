@@ -1,0 +1,47 @@
+/* Ecom Navigation — design tokens + minimal reset
+   -----------------------------------------------
+   CSS custom properties consumed throughout the dashboard
+   via inline style={{ color: "var(--ec-...)" }}
+   No framework required — just load this in layout.js.
+*/
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+:root {
+  /* Status */
+  --ec-success:       #059669;
+  --ec-success-bg:    #d1fae5;
+  --ec-success-text:  #065f46;
+  --ec-danger:        #dc2626;
+  --ec-danger-bg:     #fee2e2;
+  --ec-danger-text:   #991b1b;
+  --ec-caution:       #d97706;
+  --ec-caution-bg:    #fef3c7;
+
+  /* Surfaces */
+  --ec-bg:            #f8f9fb;
+  --ec-surface:       #ffffff;
+  --ec-border:        #e5e7eb;
+  --ec-border-light:  #f3f4f6;
+
+  /* Text */
+  --ec-text:          #111827;
+  --ec-text-muted:    #6b7280;
+  --ec-text-subtle:   #9ca3af;
+
+  /* Elevation */
+  --ec-shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --ec-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+
+  /* Shape */
+  --ec-radius:    14px;
+  --ec-radius-sm: 8px;
+  --ec-radius-xs: 6px;
+}

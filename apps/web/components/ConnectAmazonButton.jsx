@@ -39,9 +39,19 @@ export default function ConnectAmazonButton() {
   return (
     <button
       onClick={onClick}
-      className="rounded-lg px-4 py-2 border border-gray-300 hover:bg-gray-50"
+      style={{
+        padding: "8px 16px",
+        borderRadius: "var(--ec-radius-sm)",
+        border: "none",
+        background: "#111827",
+        color: "#ffffff",
+        fontSize: 13,
+        fontWeight: 600,
+        cursor: "pointer",
+        letterSpacing: "0.01em",
+      }}
     >
-      Connect Amazon (OAuth)
+      Connect Amazon
     </button>
   );
 }
