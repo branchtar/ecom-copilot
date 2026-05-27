@@ -1,4 +1,4 @@
-export const metadata = {
+﻿export const metadata = {
   title: "Support | Ecom Navigation",
   description: "Support information for Ecom Navigation."
 };
@@ -18,7 +18,7 @@ export default function SupportPage() {
             <p className="mt-3 text-slate-700">
               For product questions, account help, or onboarding support, contact:
             </p>
-            <p className="mt-4 font-medium text-slate-900">info@bwaaack.com</p>
+            <p className="mt-4 font-medium text-slate-900">support@ecomnavigation.com</p>
           </section>
 
           <section className="rounded-2xl border border-slate-200 p-6">

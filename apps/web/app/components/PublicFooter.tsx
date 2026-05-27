@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 
 export default function PublicFooter() {
   return (
@@ -13,8 +13,14 @@ export default function PublicFooter() {
           <Link className="hover:text-slate-900 underline-offset-4 hover:underline" href="/privacy">
             Privacy
           </Link>
+          <Link className="hover:text-slate-900 underline-offset-4 hover:underline" href="/terms">
+            Terms
+          </Link>
           <Link className="hover:text-slate-900 underline-offset-4 hover:underline" href="/support">
             Support
+          </Link>
+                  <Link className="hover:text-slate-900 underline-offset-4 hover:underline" href="/docs/ecom-navigation-wholesale">
+            Wholesale Setup
           </Link>
         </nav>
       </div>
