@@ -6,6 +6,7 @@ import Topbar from "../../components/ui/Topbar";
 import KpiCard from "../../components/ui/KpiCard";
 import Panel from "../../components/ui/Panel";
 import ConnectAmazonButton from "../../components/ConnectAmazonButton";
+import ConnectShopifyButton from "../../components/ConnectShopifyButton";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Mock data — replace with real API endpoints when ready
@@ -253,6 +254,11 @@ export default function DashboardPage() {
     connected: false,
     selling_partner_id: null,
   });
+  const [shopifyStatus, setShopifyStatus] = useState({
+    loading: true,
+    connected: false,
+    shop: null,
+  });
 
   // ── Health check — logic preserved exactly ───────────────────────────────
   useEffect(() => {
@@ -284,6 +290,22 @@ export default function DashboardPage() {
         selling_partner_id: data.selling_partner_id || null,
       }))
       .catch(() => setAmazonStatus({ loading: false, connected: false, selling_partner_id: null }));
+  }, [apiBase]);
+
+  // ── Shopify connection status ─────────────────────────────────────────────
+  useEffect(() => {
+    if (!apiBase) {
+      setShopifyStatus({ loading: false, connected: false, shop: null });
+      return;
+    }
+    fetch(`${apiBase}/api/integrations/shopify/status?tenant=dev`)
+      .then((r) => r.ok ? r.json() : Promise.reject(new Error("Status failed")))
+      .then((data) => setShopifyStatus({
+        loading: false,
+        connected: !!data.connected,
+        shop: data.shop || null,
+      }))
+      .catch(() => setShopifyStatus({ loading: false, connected: false, shop: null }));
   }, [apiBase]);
 
   // ── Derived style values ─────────────────────────────────────────────────
@@ -331,6 +353,29 @@ export default function DashboardPage() {
   );
 
   const notConnectedBadge = (
+    <div style={{
+      fontSize: 12, color: "var(--ec-text-subtle)",
+      padding: "3px 10px", borderRadius: 999,
+      border: "1px solid var(--ec-border)", flexShrink: 0,
+    }}>
+      Not connected
+    </div>
+  );
+
+  // Shopify badge — mirrors Amazon badge pattern
+  const shopifyBadge = shopifyStatus.loading ? (
+    <span style={{ fontSize: 12, color: "var(--ec-text-subtle)", flexShrink: 0 }}>Checking…</span>
+  ) : shopifyStatus.connected ? (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 5,
+      fontSize: 12, fontWeight: 600,
+      background: "var(--ec-success-bg)", color: "var(--ec-success-text)",
+      padding: "3px 10px", borderRadius: 999, flexShrink: 0,
+    }}>
+      <div style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--ec-success)" }} />
+      Connected
+    </div>
+  ) : (
     <div style={{
       fontSize: 12, color: "var(--ec-text-subtle)",
       padding: "3px 10px", borderRadius: 999,
@@ -488,8 +533,25 @@ export default function DashboardPage() {
             <MarketplaceCard
               iconBg="#96BF48" iconLetter="S"
               name="Shopify" sub="Online Store"
-              statusBadge={notConnectedBadge}
-            />
+              statusBadge={shopifyBadge}
+            >
+              {shopifyStatus.connected && shopifyStatus.shop && (
+                <div style={{
+                  fontSize: 11,
+                  fontFamily: "ui-monospace, 'Cascadia Code', monospace",
+                  color: "var(--ec-text-muted)",
+                  background: "var(--ec-bg)",
+                  borderRadius: "var(--ec-radius-xs)",
+                  padding: "5px 9px",
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                }}>
+                  {shopifyStatus.shop}
+                </div>
+              )}
+              {!shopifyStatus.loading && !shopifyStatus.connected && (
+                <ConnectShopifyButton />
+              )}
+            </MarketplaceCard>
 
             <MarketplaceCard
               iconBg="#0071CE" iconLetter="W"
