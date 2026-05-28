@@ -6,18 +6,16 @@ import { useSession } from "next-auth/react";
 /**
  * ConnectShopifyButton
  *
- * Prompts the user for their Shopify store domain, normalises it to
- * *.myshopify.com format, calls /api/integrations/shopify/start, and
- * redirects the browser to the Shopify OAuth authorize screen.
+ * Prompts the user for their Shopify store domain via window.prompt(),
+ * normalises it, calls /api/integrations/shopify/start, and redirects
+ * the browser to the Shopify OAuth authorize screen.
  *
- * No tokens are stored client-side. The OAuth callback is handled server-side
- * at /auth/shopify/callback.
+ * No tokens are stored client-side. The OAuth callback is handled
+ * server-side at /auth/shopify/callback.
  */
 export default function ConnectShopifyButton() {
   const { data: session } = useSession();
   const [loading, setLoading] = useState(false);
-  const [inputVisible, setInputVisible] = useState(false);
-  const [shopInput, setShopInput] = useState("");
   const [error, setError] = useState("");
 
   /**
@@ -28,8 +26,7 @@ export default function ConnectShopifyButton() {
    *   https://my-store.myshopify.com/admin → my-store.myshopify.com
    */
   function normalizeShop(raw) {
-    let s = raw.trim().toLowerCase();
-    // Strip scheme
+    let s = (raw || "").trim().toLowerCase();
     if (s.includes("://")) {
       try {
         s = new URL(s).hostname;
@@ -37,9 +34,7 @@ export default function ConnectShopifyButton() {
         s = s.replace(/^https?:\/\//, "").split("/")[0];
       }
     }
-    // Strip path
     s = s.split("/")[0].trim();
-    // Append .myshopify.com if it looks like a bare store handle
     if (s && !s.includes(".")) {
       s = `${s}.myshopify.com`;
     }
@@ -48,10 +43,13 @@ export default function ConnectShopifyButton() {
 
   async function handleConnect() {
     setError("");
-    const shop = normalizeShop(shopInput);
 
+    const raw = window.prompt("Enter your Shopify store domain:\n\nExample: my-store or my-store.myshopify.com");
+    if (raw === null) return; // user cancelled
+
+    const shop = normalizeShop(raw);
     if (!shop) {
-      setError("Please enter your Shopify store domain.");
+      setError("Please enter a valid Shopify store domain.");
       return;
     }
 
@@ -90,81 +88,26 @@ export default function ConnectShopifyButton() {
     }
   }
 
-  if (!inputVisible) {
-    return (
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       <button
-        onClick={() => setInputVisible(true)}
+        type="button"
+        onClick={handleConnect}
+        disabled={loading}
         style={{
           padding: "8px 16px",
           borderRadius: "var(--ec-radius-sm)",
           border: "none",
-          background: "#96BF48",
+          background: loading ? "#aaa" : "#96BF48",
           color: "#ffffff",
           fontSize: 13,
           fontWeight: 600,
-          cursor: "pointer",
+          cursor: loading ? "not-allowed" : "pointer",
           letterSpacing: "0.01em",
         }}
       >
-        Connect Shopify
+        {loading ? "Connecting…" : "Connect Shopify"}
       </button>
-    );
-  }
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      <div style={{ display: "flex", gap: 6 }}>
-        <input
-          type="text"
-          placeholder="my-store.myshopify.com"
-          value={shopInput}
-          onChange={(e) => { setShopInput(e.target.value); setError(""); }}
-          onKeyDown={(e) => e.key === "Enter" && handleConnect()}
-          disabled={loading}
-          style={{
-            flex: 1,
-            padding: "6px 10px",
-            borderRadius: "var(--ec-radius-xs)",
-            border: "1px solid var(--ec-border)",
-            fontSize: 13,
-            color: "var(--ec-text)",
-            background: "var(--ec-bg)",
-            outline: "none",
-          }}
-          autoFocus
-        />
-        <button
-          onClick={handleConnect}
-          disabled={loading || !shopInput.trim()}
-          style={{
-            padding: "6px 12px",
-            borderRadius: "var(--ec-radius-xs)",
-            border: "none",
-            background: loading ? "#aaa" : "#96BF48",
-            color: "#ffffff",
-            fontSize: 13,
-            fontWeight: 600,
-            cursor: loading ? "not-allowed" : "pointer",
-          }}
-        >
-          {loading ? "..." : "Go"}
-        </button>
-        <button
-          onClick={() => { setInputVisible(false); setShopInput(""); setError(""); }}
-          disabled={loading}
-          style={{
-            padding: "6px 10px",
-            borderRadius: "var(--ec-radius-xs)",
-            border: "1px solid var(--ec-border)",
-            background: "transparent",
-            color: "var(--ec-text-muted)",
-            fontSize: 13,
-            cursor: "pointer",
-          }}
-        >
-          ✕
-        </button>
-      </div>
       {error && (
         <div style={{ fontSize: 12, color: "#b91c1c" }}>{error}</div>
       )}
