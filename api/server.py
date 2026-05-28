@@ -20,6 +20,8 @@ from amazon_oauth import (
     get_connection_store,
 )
 
+import shopify_oauth as _shopify
+
 logger = logging.getLogger("ecom_copilot.api")
 
 app = FastAPI()
@@ -289,6 +291,290 @@ def amazon_connection_status(tenant: str = "dev"):
         "selling_partner_id": meta.get("selling_partner_id"),
     }
 # === EC_AMAZON_STATUS_END ===
+
+
+# =============================================================================
+# SHOPIFY CONNECTOR
+# Routes mirror the Amazon connector pattern.
+# No product/order/inventory sync in this MVP — connect/disconnect/status only.
+# =============================================================================
+
+# === EC_SHOPIFY_CONNECT_START ===
+
+def _render_shopify_success(shop: str) -> HTMLResponse:
+    safe_shop = html.escape(shop)
+    body = f"""<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Shopify Connected</title>
+    <style>
+      body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+              max-width: 560px; margin: 80px auto; padding: 0 24px; color: #111; }}
+      .card {{ border: 1px solid #e5e7eb; border-radius: 12px; padding: 28px; }}
+      h1 {{ margin: 0 0 12px; font-size: 22px; }}
+      .ok {{ color: #047857; font-weight: 600; }}
+      code {{ background: #f3f4f6; padding: 2px 6px; border-radius: 4px; }}
+      p {{ line-height: 1.5; }}
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1><span class="ok">Shopify Connected Successfully</span></h1>
+      <p>Your Shopify store is now linked to Ecom Navigation.</p>
+      <p>Shop: <code>{safe_shop}</code></p>
+      <p>You can close this tab and return to the dashboard.</p>
+    </div>
+  </body>
+</html>"""
+    return HTMLResponse(content=body, status_code=200)
+
+
+def _render_shopify_error(message: str, status_code: int) -> HTMLResponse:
+    safe_msg = html.escape(message)
+    body = f"""<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Shopify Connection Failed</title>
+    <style>
+      body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+              max-width: 560px; margin: 80px auto; padding: 0 24px; color: #111; }}
+      .card {{ border: 1px solid #fecaca; background: #fef2f2; border-radius: 12px; padding: 28px; }}
+      h1 {{ margin: 0 0 12px; font-size: 22px; color: #b91c1c; }}
+      p {{ line-height: 1.5; }}
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Shopify Connection Failed</h1>
+      <p>{safe_msg}</p>
+      <p>Please retry from the Connect Shopify button. If the problem persists,
+         contact support.</p>
+    </div>
+  </body>
+</html>"""
+    return HTMLResponse(content=body, status_code=status_code)
+
+
+@app.get("/api/integrations/shopify/start")
+def shopify_connect_start(tenant: str = "dev", shop: str = ""):
+    """
+    Step 1: validate the shop domain and return an authorize_url.
+    No side effects — only builds the redirect URL.
+
+    Required env vars:
+        SHOPIFY_CLIENT_ID
+        SHOPIFY_REDIRECT_URI
+        SHOPIFY_SCOPES   (optional, defaults to read_products,read_orders,read_inventory)
+    """
+    client_id = (os.getenv("SHOPIFY_CLIENT_ID") or "").strip()
+    redirect_uri = (os.getenv("SHOPIFY_REDIRECT_URI") or "").strip()
+    scopes = (
+        os.getenv("SHOPIFY_SCOPES") or _shopify.DEFAULT_SCOPES
+    ).strip()
+
+    if not client_id:
+        return {"ok": False, "error": "Missing env var SHOPIFY_CLIENT_ID"}
+    if not redirect_uri:
+        return {"ok": False, "error": "Missing env var SHOPIFY_REDIRECT_URI"}
+
+    try:
+        normalized_shop = _shopify.normalize_shop(shop)
+    except _shopify.InvalidShopError as exc:
+        return {"ok": False, "error": str(exc)}
+
+    state = _shopify.encode_state(tenant=tenant)
+    authorize_url = _shopify.build_authorize_url(
+        shop=normalized_shop,
+        client_id=client_id,
+        redirect_uri=redirect_uri,
+        scopes=scopes,
+        state=state,
+    )
+
+    return {
+        "ok": True,
+        "authorize_url": authorize_url,
+        "shop": normalized_shop,
+        "state": state,
+    }
+
+
+@app.get("/auth/shopify/start")
+def shopify_oauth_browser_start(tenant: str = "dev", shop: str = ""):
+    """Browser-facing entry point: build authorize URL and redirect the user."""
+    result = shopify_connect_start(tenant=tenant, shop=shop)
+
+    if not isinstance(result, dict) or not result.get("ok"):
+        error = (result or {}).get("error", "Could not build Shopify authorize URL")
+        return _render_shopify_error(error, status_code=400)
+
+    authorize_url = (result.get("authorize_url") or "").strip()
+    if not authorize_url:
+        return _render_shopify_error("Missing authorize_url", status_code=500)
+
+    return RedirectResponse(url=authorize_url, status_code=307)
+
+
+@app.get("/auth/shopify/callback")
+async def shopify_connect_callback(request: Request):
+    """
+    Step 2: receive Shopify callback, verify HMAC, exchange code, persist token.
+
+    IMPORTANT: This route handles secrets.
+    - Never log the code, access_token, or client_secret.
+    - HMAC is verified before any other processing.
+    """
+    qp = dict(request.query_params)
+
+    code = (qp.get("code") or "").strip()
+    shop_raw = (qp.get("shop") or "").strip()
+    state = (qp.get("state") or "").strip()
+    provided_hmac = (qp.get("hmac") or "").strip()
+
+    # 1. Required-param validation. Do NOT echo the code back.
+    missing = [
+        name for name, val in (
+            ("code", code),
+            ("shop", shop_raw),
+            ("state", state),
+            ("hmac", provided_hmac),
+        ) if not val
+    ]
+    if missing:
+        logger.info("Shopify callback missing params: %s", ", ".join(missing))
+        return _render_shopify_error(
+            f"Missing required parameter(s): {', '.join(missing)}.",
+            status_code=400,
+        )
+
+    # 2. Normalise shop domain.
+    try:
+        shop = _shopify.normalize_shop(shop_raw)
+    except _shopify.InvalidShopError as exc:
+        logger.info("Shopify callback invalid shop: %s", exc)
+        return _render_shopify_error(str(exc), status_code=400)
+
+    # 3. HMAC verification — must happen before state or token work.
+    client_secret = (os.getenv("SHOPIFY_CLIENT_SECRET") or "").strip()
+    if not client_secret:
+        logger.error("Shopify callback: SHOPIFY_CLIENT_SECRET is not set")
+        return _render_shopify_error(
+            "Server is missing required configuration. Contact support.",
+            status_code=500,
+        )
+    try:
+        _shopify.verify_hmac(params=qp, client_secret=client_secret)
+    except _shopify.InvalidHmacError as exc:
+        logger.warning("Shopify callback HMAC verification failed (shop=%s)", shop)
+        return _render_shopify_error(
+            "Request signature verification failed. Please retry the connection.",
+            status_code=400,
+        )
+
+    # 4. State shape + age check.
+    try:
+        state_obj = _shopify.decode_state(state)
+    except _shopify.InvalidStateError as exc:
+        logger.info("Shopify callback invalid state: %s", exc)
+        return _render_shopify_error(str(exc), status_code=400)
+
+    tenant = str(state_obj.get("tenant") or "dev")
+
+    # 5. Token exchange. Never log the code or the returned token.
+    try:
+        access_token = _shopify.exchange_code_for_token(shop=shop, code=code)
+    except _shopify.MissingConfigError as exc:
+        logger.error("Shopify callback config error: %s", exc)
+        return _render_shopify_error(
+            "Server is missing required configuration. Contact support.",
+            status_code=500,
+        )
+    except _shopify.TokenExchangeError as exc:
+        logger.warning("Shopify callback token exchange failed (shop=%s): %s", shop, exc)
+        return _render_shopify_error(
+            "Shopify refused the token exchange. Please retry the connection.",
+            status_code=502,
+        )
+
+    # 6. Persist. Never log token bodies.
+    try:
+        store = _shopify.get_connection_store()
+        store.save_connection(tenant=tenant, shop=shop, access_token=access_token)
+    except _shopify.MissingConfigError as exc:
+        logger.error("Shopify callback storage config error: %s", exc)
+        return _render_shopify_error(
+            "Server is missing required configuration. Contact support.",
+            status_code=500,
+        )
+    except _shopify.ConnectionStorageError as exc:
+        logger.error("Shopify callback storage failure (shop=%s): %s", shop, exc)
+        return _render_shopify_error(
+            "Could not save the Shopify connection. Please retry.",
+            status_code=500,
+        )
+
+    logger.info("Shopify connection saved (tenant=%s shop=%s)", tenant, shop)
+    return _render_shopify_success(shop)
+
+
+@app.get("/api/integrations/shopify/status")
+def shopify_connection_status(tenant: str = "dev"):
+    """
+    Safe connection-status check for the dashboard.
+    Returns only non-token metadata — never exposes access_token.
+    """
+    try:
+        store = _shopify.get_connection_store()
+        meta = store.get_connection_meta(tenant=tenant)
+    except _shopify.MissingConfigError as exc:
+        logger.error("shopify_connection_status config error: %s", exc)
+        return {"ok": False, "connected": False, "tenant": tenant, "shop": None,
+                "error": "Server configuration error"}
+    except _shopify.ConnectionStorageError as exc:
+        logger.error("shopify_connection_status storage error: %s", exc)
+        return {"ok": False, "connected": False, "tenant": tenant, "shop": None,
+                "error": "Could not read connection status"}
+
+    if meta is None:
+        return {"ok": True, "connected": False, "tenant": tenant, "shop": None}
+
+    return {
+        "ok": True,
+        "connected": True,
+        "tenant": meta.get("tenant", tenant),
+        "shop": meta.get("shop"),
+    }
+
+
+@app.delete("/api/integrations/shopify/disconnect")
+def shopify_disconnect(tenant: str = "dev"):
+    """
+    Disconnect the Shopify store for this tenant.
+    Deletes the stored token and metadata from Secrets Manager (or local store).
+    """
+    try:
+        store = _shopify.get_connection_store()
+        meta = store.get_connection_meta(tenant=tenant)
+    except Exception as exc:
+        logger.error("shopify_disconnect meta lookup failed (tenant=%s): %s", tenant, exc)
+        return {"ok": False, "error": "Could not look up Shopify connection"}
+
+    if meta is None or not meta.get("shop"):
+        return {"ok": True, "disconnected": False, "reason": "No connection found"}
+
+    shop = meta["shop"]
+    try:
+        store.delete_connection(tenant=tenant, shop=shop)
+    except _shopify.ConnectionStorageError as exc:
+        logger.error("shopify_disconnect delete failed (tenant=%s shop=%s): %s", tenant, shop, exc)
+        return {"ok": False, "error": "Could not delete Shopify connection"}
+
+    logger.info("Shopify connection deleted (tenant=%s shop=%s)", tenant, shop)
+    return {"ok": True, "disconnected": True, "shop": shop}
+
+# === EC_SHOPIFY_CONNECT_END ===
 
 
 # === EC_PRICING_START ===
