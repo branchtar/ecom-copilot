@@ -13,10 +13,10 @@ const nav = [
     { label: "Alerts",           href: null },
   ]},
   { section: "Marketplaces", items: [
-    { label: "Amazon",           href: "/dashboard#marketplaces" },
-    { label: "Walmart",          href: null },
-    { label: "Shopify",          href: null },
-    { label: "eBay",             href: null },
+    { label: "Amazon",  href: "/dashboard#marketplaces", logo: { bg: "#FF9900", letter: "A", color: "#fff" } },
+    { label: "Walmart", href: null,                      logo: { bg: "#0071CE", letter: "W", color: "#fff" } },
+    { label: "Shopify", href: null,                      logo: { bg: "#96BF48", letter: "S", color: "#fff" } },
+    { label: "eBay",    href: null,                      logo: { bg: "#E53238", letter: "e", color: "#fff" } },
   ]},
   { section: "Suppliers", items: [
     { label: "Supplier Catalogs",href: null },
@@ -125,25 +125,66 @@ export default function Sidebar() {
             }}>
               {group.section}
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              {group.items.map((item) =>
-                item.href ? (
-                  <Link key={item.label} href={item.href} style={liveStyle}>
-                    {item.label}
-                  </Link>
-                ) : (
-                  <button
-                    key={item.label}
-                    style={placeholderStyle}
-                    title="Coming soon"
-                    tabIndex={-1}
-                    aria-disabled="true"
-                  >
-                    {item.label}
-                  </button>
-                )
-              )}
-            </div>
+            {group.section === "Marketplaces" ? (
+              /* Icon-only strip for Marketplaces */
+              <div style={{ display: "flex", flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+                {group.items.map((item) => {
+                  const badgeStyle = {
+                    display: "inline-flex", alignItems: "center", justifyContent: "center",
+                    width: 36, height: 36, borderRadius: 10, flexShrink: 0,
+                    background: item.logo.bg,
+                    color: item.logo.color,
+                    fontSize: 15, fontWeight: 800,
+                    border: "none", padding: 0, cursor: item.href ? "pointer" : "default",
+                    opacity: item.href ? 1 : 0.35,
+                    textDecoration: "none",
+                    fontFamily: "inherit",
+                  };
+                  return item.href ? (
+                    <Link
+                      key={item.label}
+                      href={item.href}
+                      style={badgeStyle}
+                      title={item.label}
+                      aria-label={item.label}
+                    >
+                      {item.logo.letter}
+                    </Link>
+                  ) : (
+                    <button
+                      key={item.label}
+                      style={badgeStyle}
+                      title={`${item.label} – coming soon`}
+                      aria-label={`${item.label} – coming soon`}
+                      aria-disabled="true"
+                      tabIndex={-1}
+                    >
+                      {item.logo.letter}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {group.items.map((item) =>
+                  item.href ? (
+                    <Link key={item.label} href={item.href} style={liveStyle}>
+                      {item.label}
+                    </Link>
+                  ) : (
+                    <button
+                      key={item.label}
+                      style={placeholderStyle}
+                      title="Coming soon"
+                      tabIndex={-1}
+                      aria-disabled="true"
+                    >
+                      {item.label}
+                    </button>
+                  )
+                )}
+              </div>
+            )}
           </div>
         ))}
       </div>
