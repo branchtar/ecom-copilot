@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
+import { useWorkspace } from "../../lib/useWorkspace";
 import Sidebar from "../../components/ui/Sidebar";
 import Topbar from "../../components/ui/Topbar";
 import KpiCard from "../../components/ui/KpiCard";
@@ -303,6 +304,12 @@ export default function DashboardPage() {
   const { data: session } = useSession();
   const userEmail = session?.user?.email ?? null;
 
+  // Phase 3B-1: active workspace. Falls back to "dev" on error so all existing
+  // Amazon/Shopify connections continue to work without interruption.
+  const { workspace } = useWorkspace();
+  const amazonTenant  = workspace?.marketplace_tenant_refs?.amazon  ?? "dev";
+  const shopifyTenant = workspace?.marketplace_tenant_refs?.shopify ?? "dev";
+
   const [apiStatus, setApiStatus] = useState("Checking...");
   const [apiBase, setApiBase]     = useState("");
   const [amazonStatus, setAmazonStatus] = useState({
@@ -343,7 +350,7 @@ export default function DashboardPage() {
       setAmazonStatus({ loading: false, connected: false, selling_partner_id: null });
       return;
     }
-    fetch(`${apiBase}/api/integrations/amazon/status?tenant=dev`)
+    fetch(`${apiBase}/api/integrations/amazon/status?tenant=${encodeURIComponent(amazonTenant)}`)
       .then((r) => r.ok ? r.json() : Promise.reject(new Error("Status failed")))
       .then((data) => setAmazonStatus({
         loading: false,
@@ -351,7 +358,7 @@ export default function DashboardPage() {
         selling_partner_id: data.selling_partner_id || null,
       }))
       .catch(() => setAmazonStatus({ loading: false, connected: false, selling_partner_id: null }));
-  }, [apiBase]);
+  }, [apiBase, amazonTenant]);
 
   // ── Shopify connection status ─────────────────────────────────────────────
   useEffect(() => {
@@ -359,7 +366,7 @@ export default function DashboardPage() {
       setShopifyStatus({ loading: false, connected: false, shop: null });
       return;
     }
-    fetch(`${apiBase}/api/integrations/shopify/status?tenant=dev`)
+    fetch(`${apiBase}/api/integrations/shopify/status?tenant=${encodeURIComponent(shopifyTenant)}`)
       .then((r) => r.ok ? r.json() : Promise.reject(new Error("Status failed")))
       .then((data) => setShopifyStatus({
         loading: false,
@@ -367,7 +374,7 @@ export default function DashboardPage() {
         shop: data.shop || null,
       }))
       .catch(() => setShopifyStatus({ loading: false, connected: false, shop: null }));
-  }, [apiBase]);
+  }, [apiBase, shopifyTenant]);
 
   // ── Amazon orders — fires only when Amazon is connected ──────────────
   useEffect(() => {
@@ -465,7 +472,7 @@ export default function DashboardPage() {
   // ── Render ───────────────────────────────────────────────────────────────
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: "var(--ec-bg)" }}>
-      <Sidebar />
+      <Sidebar workspace={workspace} />
 
       <div style={{ flex: 1, padding: "16px 24px 40px", minWidth: 0, overflowX: "hidden" }}>
         <Topbar />

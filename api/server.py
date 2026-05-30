@@ -24,6 +24,7 @@ from amazon_oauth import (
 
 import amazon_orders as _amazon_orders
 import shopify_oauth as _shopify
+import workspace_store as _workspace
 
 logger = logging.getLogger("ecom_copilot.api")
 
@@ -712,6 +713,52 @@ def dashboard_stock_alerts():
 # === EC_DASHBOARD_END ===
 
 
+# === EC_WORKSPACES_START ===
+# Phase 3B-1: workspace profile read endpoint.
+# Returns the caller's workspace profile from Secrets Manager (or local store).
+# No tokens, no marketplace credentials are ever returned.
+#
+# Security model:
+#   * X-Ecom-Internal-Key — same shared key used by the Amazon orders endpoint.
+#     Prevents direct browser access; the Next.js proxy supplies this header.
+#   * X-Ecom-User-Sub     — Cognito sub forwarded from the NextAuth JWT.
+#     Used as the profile storage key. Never logged.
+#   * X-Ecom-User-Email   — Optional; used only when auto-creating a new profile.
+
+@app.get("/api/workspaces")
+def get_workspaces(request: Request):
+    # 1. Internal-key guard — constant-time compare, same as orders endpoint.
+    provided_key = (request.headers.get("x-ecom-internal-key") or "")
+    expected_key = (os.getenv("ECOM_INTERNAL_API_KEY") or "")
+    if not expected_key:
+        logger.error("ECOM_INTERNAL_API_KEY not set — workspaces endpoint disabled")
+        return JSONResponse({"ok": False, "error": "Workspaces endpoint not configured"}, status_code=503)
+    if not hmac.compare_digest(provided_key, expected_key):
+        logger.warning("get_workspaces: invalid internal key")
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+
+    # 2. User sub — required; used as the secret path key. Never logged.
+    user_sub = (request.headers.get("x-ecom-user-sub") or "").strip()
+    if not user_sub:
+        return JSONResponse({"ok": False, "error": "Missing X-Ecom-User-Sub"}, status_code=400)
+
+    user_email = (request.headers.get("x-ecom-user-email") or "").strip()
+
+    # 3. Load (or auto-create) the workspace profile. Idempotent.
+    try:
+        store = _workspace.get_workspace_store()
+        profile = store.get_or_create_profile(user_sub=user_sub, email=user_email)
+    except _workspace.MissingConfigError as exc:
+        logger.error("get_workspaces config error: %s", exc)
+        return JSONResponse({"ok": False, "error": "Server configuration error"}, status_code=500)
+    except _workspace.WorkspaceStorageError as exc:
+        logger.error("get_workspaces storage error: %s", exc)
+        return JSONResponse({"ok": False, "error": "Could not load workspace profile"}, status_code=500)
+
+    # 4. Return safe profile only — no tokens, no marketplace credentials.
+    return JSONResponse({"ok": True, "profile": profile})
+
+# === EC_WORKSPACES_END ===
 
 
 
