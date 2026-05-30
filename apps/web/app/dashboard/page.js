@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSession } from "next-auth/react";
 import Sidebar from "../../components/ui/Sidebar";
 import Topbar from "../../components/ui/Topbar";
 import KpiCard from "../../components/ui/KpiCard";
@@ -299,6 +300,9 @@ function MarketplaceCard({ iconBg, iconLetter, iconNode, name, sub, statusBadge,
 // Dashboard page
 // ─────────────────────────────────────────────────────────────────────────────
 export default function DashboardPage() {
+  const { data: session } = useSession();
+  const userEmail = session?.user?.email ?? null;
+
   const [apiStatus, setApiStatus] = useState("Checking...");
   const [apiBase, setApiBase]     = useState("");
   const [amazonStatus, setAmazonStatus] = useState({
@@ -487,7 +491,7 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Date range + API status pill */}
+          {/* Date range + API status pill + signed-in user */}
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <div style={{
               padding: "7px 13px",
@@ -519,6 +523,28 @@ export default function DashboardPage() {
               }} />
               API {apiStatus}
             </div>
+
+            {/* Signed-in user email — identity indicator only, no tokens shown */}
+            {userEmail && (
+              <div style={{
+                display: "flex", alignItems: "center", gap: 6,
+                padding: "7px 13px",
+                borderRadius: 999,
+                border: "1px solid var(--ec-border)",
+                background: "var(--ec-surface)",
+                boxShadow: "var(--ec-shadow-xs)",
+                fontSize: 12, fontWeight: 500,
+                color: "var(--ec-text-muted)",
+                flexShrink: 0, whiteSpace: "nowrap",
+              }}>
+                <div style={{
+                  width: 18, height: 18, borderRadius: "50%",
+                  background: "linear-gradient(135deg,#6ee7ff,#a78bfa)",
+                  flexShrink: 0,
+                }} />
+                {userEmail}
+              </div>
+            )}
           </div>
         </div>
 
