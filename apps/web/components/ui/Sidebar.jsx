@@ -11,11 +11,12 @@ import Link from "next/link";
 // These are brand-recognizable geometric interpretations, NOT official trademark
 // assets. Replace each function with a licensed SVG/Image when available.
 // Drop official files in apps/web/public/marketplace/ and swap <img> in.
+// `size` prop controls rendered px; viewBox stays 36×36 so SVG scales cleanly.
 
-function AmazonIcon() {
+function AmazonIcon({ size = 36 }) {
   // Orange square + Amazon smile-arrow in dark ink
   return (
-    <svg width="36" height="36" viewBox="0 0 36 36" fill="none" aria-hidden="true">
+    <svg width={size} height={size} viewBox="0 0 36 36" fill="none" aria-hidden="true">
       <rect width="36" height="36" rx="9" fill="#FF9900"/>
       <path d="M9 22 Q18 29.5 27 22" stroke="#131921" strokeWidth="2.5" strokeLinecap="round" fill="none"/>
       <path d="M24 19.5 L27 22 L24 24.5" stroke="#131921" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
@@ -23,21 +24,26 @@ function AmazonIcon() {
   );
 }
 
-function ShopifyIcon() {
-  // Green square + white shopping bag (bag body + arched handle)
+function ShopifyIcon({ size = 36 }) {
+  // Green square + white shopping bag (body + arched handle) + green "S" mark inside bag
   return (
-    <svg width="36" height="36" viewBox="0 0 36 36" fill="none" aria-hidden="true">
+    <svg width={size} height={size} viewBox="0 0 36 36" fill="none" aria-hidden="true">
       <rect width="36" height="36" rx="9" fill="#96BF48"/>
-      <path d="M10 17 L10 28 Q10 29.5 11.5 29.5 L24.5 29.5 Q26 29.5 26 28 L26 17 Z" fill="white"/>
-      <path d="M14 17 L14 14 Q14 9.5 18 9.5 Q22 9.5 22 14 L22 17" stroke="white" strokeWidth="2.5" strokeLinecap="round" fill="none"/>
+      {/* bag body */}
+      <path d="M9 17 L9 29 Q9 30.5 10.5 30.5 L25.5 30.5 Q27 30.5 27 29 L27 17 Z" fill="white"/>
+      {/* bag handle */}
+      <path d="M13 17 L13 13 Q13 9 18 9 Q23 9 23 13 L23 17" stroke="white" strokeWidth="2.5" strokeLinecap="round" fill="none"/>
+      {/* S mark: upper bowl curves right, lower bowl curves left */}
+      <path d="M22,20 Q23,18 18,18 Q13,18 13,21.5 Q13,24 18,24 Q23,24 23,27.5 Q23,30 18,30 Q13,30 12,28.5"
+        stroke="#4a7a1a" strokeWidth="2" fill="none" strokeLinecap="round"/>
     </svg>
   );
 }
 
-function WalmartIcon() {
+function WalmartIcon({ size = 36 }) {
   // Blue square + white 6-petal spark (6 rounded bars rotated 60° apart)
   return (
-    <svg width="36" height="36" viewBox="0 0 36 36" fill="none" aria-hidden="true">
+    <svg width={size} height={size} viewBox="0 0 36 36" fill="none" aria-hidden="true">
       <rect width="36" height="36" rx="9" fill="#0071CE"/>
       <rect x="16.5" y="8" width="3" height="10" rx="1.5" fill="white" transform="rotate(0 18 18)"/>
       <rect x="16.5" y="8" width="3" height="10" rx="1.5" fill="white" transform="rotate(60 18 18)"/>
@@ -49,10 +55,10 @@ function WalmartIcon() {
   );
 }
 
-function EbayIcon() {
+function EbayIcon({ size = 36 }) {
   // Light square + 2×2 grid in eBay's 4 brand colors (red, blue, yellow, green)
   return (
-    <svg width="36" height="36" viewBox="0 0 36 36" fill="none" aria-hidden="true">
+    <svg width={size} height={size} viewBox="0 0 36 36" fill="none" aria-hidden="true">
       <rect width="36" height="36" rx="9" fill="#f3f3f3"/>
       <rect x="7"  y="7"  width="10" height="10" rx="2.5" fill="#E53238"/>
       <rect x="19" y="7"  width="10" height="10" rx="2.5" fill="#0064D2"/>
@@ -62,12 +68,12 @@ function EbayIcon() {
   );
 }
 
-// Maps marketplace label → icon component
+// Maps marketplace label → icon component (size=22 for compact sidebar rows)
 const MARKETPLACE_ICONS = {
-  Amazon:  <AmazonIcon />,
-  Walmart: <WalmartIcon />,
-  Shopify: <ShopifyIcon />,
-  eBay:    <EbayIcon />,
+  Amazon:  <AmazonIcon  size={22} />,
+  Shopify: <ShopifyIcon size={22} />,
+  Walmart: <WalmartIcon size={22} />,
+  eBay:    <EbayIcon    size={22} />,
 };
 
 const nav = [
@@ -77,8 +83,8 @@ const nav = [
   ]},
   { section: "Marketplaces", items: [
     { label: "Amazon",  href: "/dashboard#marketplaces" },
-    { label: "Walmart", href: null },
     { label: "Shopify", href: null },
+    { label: "Walmart", href: null },
     { label: "eBay",    href: null },
   ]},
   { section: "Suppliers", items: [
@@ -189,39 +195,34 @@ export default function Sidebar() {
               {group.section}
             </div>
             {group.section === "Marketplaces" ? (
-              /* Icon-only strip — SVG placeholders, see MARKETPLACE_ICONS above */
-              <div style={{ display: "flex", flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+              /* Icon + title rows — SVG placeholders, see MARKETPLACE_ICONS above */
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 {group.items.map((item) => {
-                  const badgeStyle = {
-                    display: "inline-flex", alignItems: "center", justifyContent: "center",
-                    width: 36, height: 36, flexShrink: 0,
-                    background: "transparent",
-                    border: "none", padding: 0,
-                    cursor: item.href ? "pointer" : "default",
-                    opacity: item.href ? 1 : 0.35,
-                    textDecoration: "none",
-                    fontFamily: "inherit",
-                  };
+                  const rowStyle = item.href
+                    ? { ...liveStyle,        display: "flex", alignItems: "center", gap: 10 }
+                    : { ...placeholderStyle, display: "flex", alignItems: "center", gap: 10 };
                   return item.href ? (
                     <Link
                       key={item.label}
                       href={item.href}
-                      style={badgeStyle}
+                      style={rowStyle}
                       title={item.label}
                       aria-label={item.label}
                     >
-                      {MARKETPLACE_ICONS[item.label]}
+                      <span style={{ flexShrink: 0, display: "flex" }}>{MARKETPLACE_ICONS[item.label]}</span>
+                      <span>{item.label}</span>
                     </Link>
                   ) : (
                     <button
                       key={item.label}
-                      style={badgeStyle}
+                      style={rowStyle}
                       title={`${item.label} – coming soon`}
                       aria-label={`${item.label} – coming soon`}
                       aria-disabled="true"
                       tabIndex={-1}
                     >
-                      {MARKETPLACE_ICONS[item.label]}
+                      <span style={{ flexShrink: 0, display: "flex" }}>{MARKETPLACE_ICONS[item.label]}</span>
+                      <span>{item.label}</span>
                     </button>
                   );
                 })}

@@ -9,6 +9,57 @@ import ConnectAmazonButton from "../../components/ConnectAmazonButton";
 import ConnectShopifyButton from "../../components/ConnectShopifyButton";
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Marketplace SVG icon placeholders (duplicated from Sidebar.jsx intentionally —
+// extract to components/ui/MarketplaceIcons.jsx when shared usage grows).
+// These are brand-recognizable geometric interpretations, NOT official trademark
+// assets. Replace with licensed SVGs/Images when available.
+// ─────────────────────────────────────────────────────────────────────────────
+function MktAmazonIcon() {
+  return (
+    <svg width="38" height="38" viewBox="0 0 36 36" fill="none" aria-hidden="true">
+      <rect width="36" height="36" rx="9" fill="#FF9900"/>
+      <path d="M9 22 Q18 29.5 27 22" stroke="#131921" strokeWidth="2.5" strokeLinecap="round" fill="none"/>
+      <path d="M24 19.5 L27 22 L24 24.5" stroke="#131921" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+    </svg>
+  );
+}
+function MktShopifyIcon() {
+  return (
+    <svg width="38" height="38" viewBox="0 0 36 36" fill="none" aria-hidden="true">
+      <rect width="36" height="36" rx="9" fill="#96BF48"/>
+      <path d="M9 17 L9 29 Q9 30.5 10.5 30.5 L25.5 30.5 Q27 30.5 27 29 L27 17 Z" fill="white"/>
+      <path d="M13 17 L13 13 Q13 9 18 9 Q23 9 23 13 L23 17" stroke="white" strokeWidth="2.5" strokeLinecap="round" fill="none"/>
+      <path d="M22,20 Q23,18 18,18 Q13,18 13,21.5 Q13,24 18,24 Q23,24 23,27.5 Q23,30 18,30 Q13,30 12,28.5"
+        stroke="#4a7a1a" strokeWidth="2" fill="none" strokeLinecap="round"/>
+    </svg>
+  );
+}
+function MktWalmartIcon() {
+  return (
+    <svg width="38" height="38" viewBox="0 0 36 36" fill="none" aria-hidden="true">
+      <rect width="36" height="36" rx="9" fill="#0071CE"/>
+      <rect x="16.5" y="8" width="3" height="10" rx="1.5" fill="white" transform="rotate(0 18 18)"/>
+      <rect x="16.5" y="8" width="3" height="10" rx="1.5" fill="white" transform="rotate(60 18 18)"/>
+      <rect x="16.5" y="8" width="3" height="10" rx="1.5" fill="white" transform="rotate(120 18 18)"/>
+      <rect x="16.5" y="8" width="3" height="10" rx="1.5" fill="white" transform="rotate(180 18 18)"/>
+      <rect x="16.5" y="8" width="3" height="10" rx="1.5" fill="white" transform="rotate(240 18 18)"/>
+      <rect x="16.5" y="8" width="3" height="10" rx="1.5" fill="white" transform="rotate(300 18 18)"/>
+    </svg>
+  );
+}
+function MktEbayIcon() {
+  return (
+    <svg width="38" height="38" viewBox="0 0 36 36" fill="none" aria-hidden="true">
+      <rect width="36" height="36" rx="9" fill="#f3f3f3"/>
+      <rect x="7"  y="7"  width="10" height="10" rx="2.5" fill="#E53238"/>
+      <rect x="19" y="7"  width="10" height="10" rx="2.5" fill="#0064D2"/>
+      <rect x="7"  y="19" width="10" height="10" rx="2.5" fill="#F5AF02"/>
+      <rect x="19" y="19" width="10" height="10" rx="2.5" fill="#86B817"/>
+    </svg>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Mock data — replace with real API endpoints when ready
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -212,7 +263,8 @@ function DonutChart() {
 // ─────────────────────────────────────────────────────────────────────────────
 // Marketplace connection card
 // ─────────────────────────────────────────────────────────────────────────────
-function MarketplaceCard({ iconBg, iconLetter, name, sub, statusBadge, children, faded }) {
+// iconNode (SVG) takes priority over iconBg/iconLetter fallback
+function MarketplaceCard({ iconBg, iconLetter, iconNode, name, sub, statusBadge, children, faded }) {
   return (
     <div style={{
       border: "1px solid var(--ec-border)",
@@ -226,11 +278,11 @@ function MarketplaceCard({ iconBg, iconLetter, name, sub, statusBadge, children,
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <div style={{
           width: 38, height: 38, borderRadius: "var(--ec-radius-sm)",
-          background: iconBg, color: "#fff",
+          background: iconNode ? "transparent" : iconBg, color: "#fff",
           fontWeight: 800, fontSize: 16, flexShrink: 0,
           display: "flex", alignItems: "center", justifyContent: "center",
         }}>
-          {iconLetter}
+          {iconNode ?? iconLetter}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontWeight: 700, fontSize: 14, color: "var(--ec-text)" }}>{name}</div>
@@ -508,7 +560,7 @@ export default function DashboardPage() {
           }}>
             {/* Amazon — live API status; ConnectAmazonButton OAuth preserved */}
             <MarketplaceCard
-              iconBg="#FF9900" iconLetter="A"
+              iconNode={<MktAmazonIcon />}
               name="Amazon" sub="Seller Central"
               statusBadge={amazonBadge}
             >
@@ -531,7 +583,7 @@ export default function DashboardPage() {
             </MarketplaceCard>
 
             <MarketplaceCard
-              iconBg="#96BF48" iconLetter="S"
+              iconNode={<MktShopifyIcon />}
               name="Shopify" sub="Online Store"
               statusBadge={shopifyBadge}
             >
@@ -554,14 +606,14 @@ export default function DashboardPage() {
             </MarketplaceCard>
 
             <MarketplaceCard
-              iconBg="#0071CE" iconLetter="W"
+              iconNode={<MktWalmartIcon />}
               name="Walmart" sub="Marketplace"
               statusBadge={comingSoonBadge}
               faded
             />
 
             <MarketplaceCard
-              iconBg="#E43137" iconLetter="e"
+              iconNode={<MktEbayIcon />}
               name="eBay" sub="Marketplace"
               statusBadge={comingSoonBadge}
               faded
