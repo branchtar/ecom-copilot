@@ -311,6 +311,11 @@ export default function DashboardPage() {
     connected: false,
     shop: null,
   });
+  const [amazonOrders, setAmazonOrders] = useState({
+    loading: false,
+    orders: [],
+    error: null,
+  });
 
   // ── Health check — logic preserved exactly ───────────────────────────────
   useEffect(() => {
@@ -359,6 +364,22 @@ export default function DashboardPage() {
       }))
       .catch(() => setShopifyStatus({ loading: false, connected: false, shop: null }));
   }, [apiBase]);
+
+  // ── Amazon orders — fires only when Amazon is connected ──────────────
+  useEffect(() => {
+    if (amazonStatus.loading || !amazonStatus.connected) return;
+    setAmazonOrders({ loading: true, orders: [], error: null });
+    fetch("/api/amazon/orders?tenant=dev&days=30&max_results=50", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.ok) {
+          setAmazonOrders({ loading: false, orders: data.orders || [], error: null });
+        } else {
+          setAmazonOrders({ loading: false, orders: [], error: data.error || "Failed to load orders" });
+        }
+      })
+      .catch(() => setAmazonOrders({ loading: false, orders: [], error: "Could not reach orders API" }));
+  }, [amazonStatus.connected, amazonStatus.loading]);
 
   // ── Derived style values ─────────────────────────────────────────────────
   const dotColor =
@@ -620,6 +641,85 @@ export default function DashboardPage() {
             />
           </div>
         </div>
+
+        {/* ── Amazon Recent Orders ────────────────────────────────────────── */}
+        {/* Only renders when Amazon is connected; hides entirely otherwise. */}
+        {amazonStatus.connected && (
+          <div style={{ marginTop: 16 }}>
+            <Panel title="Amazon Recent Orders (last 30 days)">
+              {amazonOrders.loading && (
+                <div style={{ fontSize: 13, color: "var(--ec-text-subtle)", padding: "8px 0" }}>
+                  Loading orders…
+                </div>
+              )}
+              {!amazonOrders.loading && amazonOrders.error && (
+                <div style={{ fontSize: 13, color: "var(--ec-danger)", padding: "8px 0" }}>
+                  {amazonOrders.error}
+                </div>
+              )}
+              {!amazonOrders.loading && !amazonOrders.error && amazonOrders.orders.length === 0 && (
+                <div style={{ fontSize: 13, color: "var(--ec-text-subtle)", padding: "8px 0" }}>
+                  No orders found for this period.
+                </div>
+              )}
+              {!amazonOrders.loading && !amazonOrders.error && amazonOrders.orders.length > 0 && (
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ color: "var(--ec-text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", fontSize: 10 }}>
+                        <th style={{ textAlign: "left", padding: "4px 8px 8px 0", fontWeight: 600 }}>Order ID</th>
+                        <th style={{ textAlign: "left", padding: "4px 8px 8px 0", fontWeight: 600 }}>Date</th>
+                        <th style={{ textAlign: "left", padding: "4px 8px 8px 0", fontWeight: 600 }}>Status</th>
+                        <th style={{ textAlign: "left", padding: "4px 8px 8px 0", fontWeight: 600 }}>Channel</th>
+                        <th style={{ textAlign: "right", padding: "4px 0 8px 0",   fontWeight: 600 }}>Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {amazonOrders.orders.map((o, i) => (
+                        <tr key={o.orderId || i} style={{
+                          borderTop: "1px solid var(--ec-border)",
+                          color: "var(--ec-text)",
+                        }}>
+                          <td style={{ padding: "7px 8px 7px 0", fontFamily: "ui-monospace, monospace", fontSize: 11 }}>
+                            {o.orderId || "—"}
+                          </td>
+                          <td style={{ padding: "7px 8px 7px 0", color: "var(--ec-text-muted)" }}>
+                            {o.purchaseDate ? o.purchaseDate.slice(0, 10) : "—"}
+                          </td>
+                          <td style={{ padding: "7px 8px 7px 0" }}>
+                            <span style={{
+                              padding: "2px 7px", borderRadius: 999, fontSize: 10, fontWeight: 600,
+                              background:
+                                o.orderStatus === "Shipped"   ? "var(--ec-success-bg)" :
+                                o.orderStatus === "Canceled"  ? "rgba(239,68,68,0.1)"  :
+                                o.orderStatus === "Pending"   ? "var(--ec-caution-bg)" :
+                                "var(--ec-border-light)",
+                              color:
+                                o.orderStatus === "Shipped"   ? "var(--ec-success-text)" :
+                                o.orderStatus === "Canceled"  ? "var(--ec-danger)"        :
+                                o.orderStatus === "Pending"   ? "var(--ec-caution)"       :
+                                "var(--ec-text-muted)",
+                            }}>
+                              {o.orderStatus || "—"}
+                            </span>
+                          </td>
+                          <td style={{ padding: "7px 8px 7px 0", color: "var(--ec-text-muted)" }}>
+                            {o.fulfillmentChannel || "—"}
+                          </td>
+                          <td style={{ padding: "7px 0", textAlign: "right", fontWeight: 600 }}>
+                            {o.orderTotal
+                              ? `${o.orderTotal.currencyCode || ""} ${parseFloat(o.orderTotal.amount || 0).toFixed(2)}`
+                              : "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Panel>
+          </div>
+        )}
 
         {/* ── Supplier Pipeline | Recent Activity | Alerts & Tasks ─────────── */}
         <div style={{

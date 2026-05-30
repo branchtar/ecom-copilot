@@ -232,6 +232,18 @@ class AmazonConnectionStore(ABC):
         """
         ...
 
+    @abstractmethod
+    def get_tokens(self, *, tenant: str) -> Optional[dict]:
+        """
+        Returns the full token bundle for the most recent connection for this
+        tenant, or None if no connection exists.
+
+        Returned fields: access_token, refresh_token, token_type, expires_in,
+        obtained_at. Used by the orders helpers to obtain a valid SP-API token.
+        NEVER log the returned dict — it contains live credentials.
+        """
+        ...
+
 
 # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 # NOT PRODUCTION-DURABLE.
@@ -366,6 +378,29 @@ class LocalEncryptedJsonAmazonConnectionStore(AmazonConnectionStore):
     def get_connection_meta(self, *, tenant: str) -> Optional[dict]:
         obj = self._load()
         return (obj.get("tenant_meta") or {}).get(tenant)
+
+    def get_tokens(self, *, tenant: str) -> Optional[dict]:
+        obj = self._load()
+        meta = (obj.get("tenant_meta") or {}).get(tenant)
+        if not meta:
+            return None
+        spid = meta.get("selling_partner_id")
+        if not spid:
+            return None
+        entry = obj.get("connections", {}).get(self._key(tenant, spid))
+        if not entry:
+            return None
+        ciphertext = entry.get("encrypted_payload", "")
+        if not ciphertext:
+            return None
+        try:
+            plaintext = self._fernet.decrypt(ciphertext.encode("utf-8"))
+            # NEVER log plaintext — it contains live credentials.
+            return json.loads(plaintext.decode("utf-8"))
+        except (InvalidToken, ValueError) as exc:
+            raise ConnectionStorageError(
+                "Could not decrypt stored token bundle"
+            ) from exc
 
 
 class SecretsManagerAmazonConnectionStore(AmazonConnectionStore):
@@ -569,6 +604,42 @@ class SecretsManagerAmazonConnectionStore(AmazonConnectionStore):
             )
             raise ConnectionStorageError(
                 "Could not read connection metadata from Secrets Manager"
+            ) from exc
+
+    def get_tokens(self, *, tenant: str) -> Optional[dict]:
+        """
+        Retrieves the token bundle secret for this tenant's most recent
+        connection. Returns a dict with access_token, refresh_token, token_type,
+        expires_in, obtained_at, or None if no connection exists.
+        NEVER log the returned dict — it contains live credentials.
+        """
+        meta = self.get_connection_meta(tenant=tenant)
+        if not meta:
+            return None
+        spid = meta.get("selling_partner_id")
+        if not spid:
+            return None
+        name = self._secret_name(tenant, spid)
+        try:
+            resp = self._client.get_secret_value(SecretId=name)
+            data = json.loads(resp["SecretString"])
+            # Return only the declared token fields — guard against future drift.
+            # NEVER log this dict.
+            return {
+                "access_token":  data.get("access_token", ""),
+                "refresh_token": data.get("refresh_token", ""),
+                "token_type":    data.get("token_type", "bearer"),
+                "expires_in":    data.get("expires_in", 3600),
+                "obtained_at":   data.get("obtained_at", 0),
+            }
+        except self._client.exceptions.ResourceNotFoundException:
+            return None
+        except Exception as exc:
+            logger.warning(
+                "Secrets Manager get_tokens failed (tenant=%s)", tenant
+            )
+            raise ConnectionStorageError(
+                "Could not read token bundle from Secrets Manager"
             ) from exc
 
 

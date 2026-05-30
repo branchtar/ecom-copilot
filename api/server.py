@@ -1,7 +1,9 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
+import datetime
+import hmac
 import html
 import json
 import logging
@@ -20,6 +22,7 @@ from amazon_oauth import (
     get_connection_store,
 )
 
+import amazon_orders as _amazon_orders
 import shopify_oauth as _shopify
 
 logger = logging.getLogger("ecom_copilot.api")
@@ -291,6 +294,72 @@ def amazon_connection_status(tenant: str = "dev"):
         "selling_partner_id": meta.get("selling_partner_id"),
     }
 # === EC_AMAZON_STATUS_END ===
+
+# === EC_AMAZON_ORDERS_START ===
+# Amazon Orders (read-only, no PII, no storage).
+#
+# Security model:
+#   * Caller MUST supply X-Ecom-Internal-Key matching ECOM_INTERNAL_API_KEY.
+#   * This endpoint is NOT meant to be called from the browser directly.
+#   * The Next.js server route /api/amazon/orders validates the user's
+#     NextAuth/Cognito session before proxying here with the internal key.
+#   * NEVER log the internal key or the SP-API access token.
+
+@app.get("/api/integrations/amazon/orders")
+def amazon_orders_list(
+    request: Request,
+    tenant: str = "dev",
+    days: int = 30,
+    max_results: int = 50,
+):
+    # 1. Internal-key guard — constant-time compare to prevent timing attacks.
+    provided_key = (request.headers.get("x-ecom-internal-key") or "")
+    expected_key = (os.getenv("ECOM_INTERNAL_API_KEY") or "")
+    if not expected_key:
+        logger.error("ECOM_INTERNAL_API_KEY is not set — orders endpoint is disabled")
+        return JSONResponse({"ok": False, "error": "Orders endpoint not configured"}, status_code=503)
+    if not hmac.compare_digest(provided_key, expected_key):
+        logger.warning("amazon_orders_list: invalid internal key (tenant=%s)", tenant)
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+
+    # 2. Build CreatedAfter timestamp (ISO 8601).
+    days_clamped = max(1, min(int(days), 90))
+    created_after = (
+        datetime.datetime.utcnow() - datetime.timedelta(days=days_clamped)
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    marketplace_id = (os.getenv("AMAZON_MARKETPLACE_ID") or "ATVPDKIKX0DER").strip()
+
+    # 3. Obtain a valid access token (refresh if near-expiry).
+    try:
+        access_token = _amazon_orders.get_valid_access_token(tenant)
+    except _amazon_orders.AmazonOrdersError as exc:
+        logger.error("amazon_orders_list: token error (tenant=%s): %s", tenant, exc)
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
+
+    # 4. Fetch orders from SP-API.
+    try:
+        raw_orders = _amazon_orders.fetch_orders(
+            access_token,
+            marketplace_id=marketplace_id,
+            created_after=created_after,
+            max_results=min(max(1, int(max_results)), 100),
+        )
+    except _amazon_orders.OrderFetchError as exc:
+        logger.error("amazon_orders_list: fetch error (tenant=%s): %s", tenant, exc)
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
+
+    # 5. Normalize — strips PII fields.
+    orders = [_amazon_orders.normalize_order(o) for o in raw_orders]
+
+    return JSONResponse({
+        "ok": True,
+        "tenant": tenant,
+        "orders": orders,
+        "count": len(orders),
+    })
+
+# === EC_AMAZON_ORDERS_END ===
 
 
 # =============================================================================
