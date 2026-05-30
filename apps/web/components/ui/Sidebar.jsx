@@ -143,7 +143,7 @@ const placeholderStyle = {
   fontWeight: "inherit",
 };
 
-export default function Sidebar() {
+export default function Sidebar({ workspace }) {
   return (
     <aside style={{
       width: 260,
@@ -177,9 +177,11 @@ export default function Sidebar() {
         background: "rgba(255,255,255,0.04)",
       }}>
         <div style={{ fontSize: 11, opacity: 0.75 }}>Workspace</div>
-        <div style={{ fontWeight: 700, fontSize: 13, marginTop: 2 }}>Bwaaack / Copy & Paste LLC</div>
+        <div style={{ fontWeight: 700, fontSize: 13, marginTop: 2 }}>
+          {workspace?.name ?? "Workspace"}
+        </div>
         <div style={{ fontSize: 11, opacity: 0.6, marginTop: 5 }}>
-          Status: <span style={{ fontWeight: 700, opacity: 1 }}>Dev</span>
+          Status: <span style={{ fontWeight: 700, opacity: 1 }}>{workspace?.plan ?? "dev"}</span>
         </div>
       </div>
 
