@@ -304,11 +304,15 @@ export default function DashboardPage() {
   const { data: session } = useSession();
   const userEmail = session?.user?.email ?? null;
 
-  // Phase 3B-1: active workspace. Falls back to "dev" on error so all existing
-  // Amazon/Shopify connections continue to work without interruption.
-  const { workspace } = useWorkspace();
-  const amazonTenant  = workspace?.marketplace_tenant_refs?.amazon  ?? "dev";
-  const shopifyTenant = workspace?.marketplace_tenant_refs?.shopify ?? "dev";
+  // Phase 3B-2: active workspace.
+  // While the profile is still loading (profile === null), fall back to "dev" so
+  // the existing Bwaaack connections work during the initial page load.
+  // Once the profile has settled, use the actual tenant ref — null means the active
+  // workspace has no connection for that channel (status fetch is skipped).
+  const { workspace, profile, saving, createWorkspace, setActiveWorkspace } = useWorkspace();
+  const workspaceReady = profile !== null;
+  const amazonTenant  = workspaceReady ? (workspace?.marketplace_tenant_refs?.amazon  ?? null) : "dev";
+  const shopifyTenant = workspaceReady ? (workspace?.marketplace_tenant_refs?.shopify ?? null) : "dev";
 
   const [apiStatus, setApiStatus] = useState("Checking...");
   const [apiBase, setApiBase]     = useState("");
@@ -344,9 +348,15 @@ export default function DashboardPage() {
       .catch(() => setApiStatus("Offline"));
   }, []);
 
-  // ── Amazon connection status — logic preserved exactly ───────────────────
+  // ── Amazon connection status ─────────────────────────────────────────────
   useEffect(() => {
     if (!apiBase) {
+      setAmazonStatus({ loading: false, connected: false, selling_partner_id: null });
+      return;
+    }
+    // null = workspace loaded but has no Amazon ref — skip fetch, mark disconnected.
+    // This prevents a new workspace from inheriting the Bwaaack/dev connection status.
+    if (amazonTenant === null) {
       setAmazonStatus({ loading: false, connected: false, selling_partner_id: null });
       return;
     }
@@ -363,6 +373,11 @@ export default function DashboardPage() {
   // ── Shopify connection status ─────────────────────────────────────────────
   useEffect(() => {
     if (!apiBase) {
+      setShopifyStatus({ loading: false, connected: false, shop: null });
+      return;
+    }
+    // null = workspace loaded but has no Shopify ref — skip fetch, mark disconnected.
+    if (shopifyTenant === null) {
       setShopifyStatus({ loading: false, connected: false, shop: null });
       return;
     }
@@ -472,7 +487,13 @@ export default function DashboardPage() {
   // ── Render ───────────────────────────────────────────────────────────────
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: "var(--ec-bg)" }}>
-      <Sidebar workspace={workspace} />
+      <Sidebar
+        workspace={workspace}
+        profile={profile}
+        createWorkspace={createWorkspace}
+        setActiveWorkspace={setActiveWorkspace}
+        saving={saving}
+      />
 
       <div style={{ flex: 1, padding: "16px 24px 40px", minWidth: 0, overflowX: "hidden" }}>
         <Topbar />

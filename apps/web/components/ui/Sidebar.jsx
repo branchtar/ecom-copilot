@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 
 // href: string  → real Next.js Link (route exists)
@@ -143,7 +144,254 @@ const placeholderStyle = {
   fontWeight: "inherit",
 };
 
-export default function Sidebar({ workspace }) {
+// ── WorkspaceSelector ─────────────────────────────────────────────────────
+// Self-contained inline dropdown for viewing, switching, and creating workspaces.
+// All state is local. Receives actions from useWorkspace() via Sidebar props.
+
+function WorkspaceSelector({ workspace, profile, createWorkspace, setActiveWorkspace, saving }) {
+  const [open,       setOpen]       = useState(false);
+  const [adding,     setAdding]     = useState(false);
+  const [inputName,  setInputName]  = useState("");
+  const [inputError, setInputError] = useState(null);
+
+  const workspaces = profile?.workspaces ?? [];
+
+  function handleToggle() {
+    const willClose = open;
+    setOpen((o) => !o);
+    if (willClose) {
+      setAdding(false);
+      setInputName("");
+      setInputError(null);
+    }
+  }
+
+  async function handleSwitch(id) {
+    if (id === profile?.active_workspace_id || saving) return;
+    setOpen(false);
+    setAdding(false);
+    await setActiveWorkspace(id);
+  }
+
+  async function handleCreate() {
+    const name = inputName.trim();
+    if (!name || name.length < 2) {
+      setInputError("Name must be at least 2 characters.");
+      return;
+    }
+    if (name.length > 80) {
+      setInputError("Name must be 80 characters or fewer.");
+      return;
+    }
+    setInputError(null);
+    const result = await createWorkspace(name);
+    if (result.ok) {
+      setInputName("");
+      setAdding(false);
+      setOpen(false);
+    } else {
+      setInputError(result.error || "Could not create workspace.");
+    }
+  }
+
+  return (
+    <div style={{ position: "relative", marginBottom: 14 }}>
+      {/* Workspace block — click to open / close selector */}
+      <button
+        onClick={handleToggle}
+        aria-expanded={open}
+        style={{
+          width: "100%",
+          border: "1px solid rgba(255,255,255,0.10)",
+          borderRadius: open ? "12px 12px 0 0" : 12,
+          padding: "9px 11px",
+          background: "rgba(255,255,255,0.04)",
+          color: "#e6eefc",
+          textAlign: "left",
+          cursor: "pointer",
+          fontFamily: "inherit",
+        }}
+      >
+        <div style={{ fontSize: 11, opacity: 0.75 }}>Workspace</div>
+        <div style={{
+          display: "flex", alignItems: "center",
+          justifyContent: "space-between", marginTop: 2,
+        }}>
+          <div style={{
+            fontWeight: 700, fontSize: 13,
+            flex: 1, overflow: "hidden",
+            textOverflow: "ellipsis", whiteSpace: "nowrap",
+          }}>
+            {workspace?.name ?? "Workspace"}
+          </div>
+          <span style={{ opacity: 0.4, fontSize: 9, flexShrink: 0, marginLeft: 6 }}>
+            {open ? "▲" : "▼"}
+          </span>
+        </div>
+        <div style={{ fontSize: 11, opacity: 0.6, marginTop: 5 }}>
+          Status:{" "}
+          <span style={{ fontWeight: 700, opacity: 1 }}>
+            {workspace?.plan ?? "dev"}
+          </span>
+        </div>
+      </button>
+
+      {/* Dropdown panel — inline below the button */}
+      {open && (
+        <div style={{
+          border: "1px solid rgba(255,255,255,0.10)",
+          borderTop: "none",
+          borderRadius: "0 0 12px 12px",
+          background: "#0c1628",
+          overflow: "hidden",
+          // zIndex ensures dropdown overlays nav items below it in the sidebar
+          position: "relative",
+          zIndex: 10,
+        }}>
+          {/* Workspace list */}
+          {workspaces.map((ws) => {
+            const isActive = ws.id === profile?.active_workspace_id;
+            return (
+              <button
+                key={ws.id}
+                onClick={() => handleSwitch(ws.id)}
+                disabled={saving}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 9,
+                  width: "100%",
+                  padding: "9px 12px",
+                  background: isActive ? "rgba(110,231,255,0.06)" : "transparent",
+                  border: "none",
+                  borderBottom: "1px solid rgba(255,255,255,0.05)",
+                  color: "#e6eefc",
+                  textAlign: "left",
+                  cursor: saving ? "wait" : "pointer",
+                  fontFamily: "inherit",
+                  fontSize: 12,
+                  fontWeight: isActive ? 700 : 400,
+                }}
+              >
+                <span style={{
+                  width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
+                  background: isActive ? "#6ee7ff" : "rgba(255,255,255,0.18)",
+                }} />
+                <span style={{
+                  flex: 1, overflow: "hidden",
+                  textOverflow: "ellipsis", whiteSpace: "nowrap",
+                }}>
+                  {ws.name}
+                </span>
+                {isActive && (
+                  <span style={{ fontSize: 9, opacity: 0.45, flexShrink: 0 }}>active</span>
+                )}
+              </button>
+            );
+          })}
+
+          {/* Add business row */}
+          {!adding ? (
+            <button
+              onClick={() => setAdding(true)}
+              style={{
+                display: "block",
+                width: "100%",
+                padding: "9px 12px",
+                background: "transparent",
+                border: "none",
+                color: "rgba(110,231,255,0.65)",
+                textAlign: "left",
+                cursor: "pointer",
+                fontFamily: "inherit",
+                fontSize: 12,
+              }}
+            >
+              + Add business
+            </button>
+          ) : (
+            <div style={{
+              padding: "10px 12px",
+              borderTop: "1px solid rgba(255,255,255,0.06)",
+            }}>
+              <input
+                autoFocus
+                type="text"
+                placeholder="Business name"
+                maxLength={80}
+                value={inputName}
+                onChange={(e) => { setInputName(e.target.value); setInputError(null); }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter")  handleCreate();
+                  if (e.key === "Escape") {
+                    setAdding(false);
+                    setInputName("");
+                    setInputError(null);
+                  }
+                }}
+                style={{
+                  width: "100%",
+                  background: "rgba(255,255,255,0.07)",
+                  border: "1px solid rgba(255,255,255,0.14)",
+                  borderRadius: 7,
+                  padding: "6px 9px",
+                  color: "#e6eefc",
+                  fontSize: 12,
+                  fontFamily: "inherit",
+                  outline: "none",
+                  boxSizing: "border-box",
+                }}
+              />
+              {inputError && (
+                <div style={{ fontSize: 11, color: "#f87171", marginTop: 5 }}>
+                  {inputError}
+                </div>
+              )}
+              <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                <button
+                  onClick={handleCreate}
+                  disabled={saving || !inputName.trim()}
+                  style={{
+                    flex: 1,
+                    padding: "5px 0",
+                    background: "rgba(110,231,255,0.12)",
+                    border: "1px solid rgba(110,231,255,0.22)",
+                    borderRadius: 6,
+                    color: saving ? "rgba(110,231,255,0.45)" : "#6ee7ff",
+                    fontSize: 12,
+                    cursor: saving || !inputName.trim() ? "not-allowed" : "pointer",
+                    fontFamily: "inherit",
+                    opacity: !inputName.trim() ? 0.55 : 1,
+                  }}
+                >
+                  {saving ? "Saving…" : "Save"}
+                </button>
+                <button
+                  onClick={() => { setAdding(false); setInputName(""); setInputError(null); }}
+                  style={{
+                    flex: 1,
+                    padding: "5px 0",
+                    background: "transparent",
+                    border: "1px solid rgba(255,255,255,0.10)",
+                    borderRadius: 6,
+                    color: "rgba(230,238,252,0.45)",
+                    fontSize: 12,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function Sidebar({ workspace, profile, createWorkspace, setActiveWorkspace, saving }) {
   return (
     <aside style={{
       width: 260,
@@ -168,22 +416,14 @@ export default function Sidebar({ workspace }) {
         </div>
       </div>
 
-      {/* Workspace */}
-      <div style={{
-        border: "1px solid rgba(255,255,255,0.10)",
-        borderRadius: 12,
-        padding: "9px 11px",
-        marginBottom: 14,
-        background: "rgba(255,255,255,0.04)",
-      }}>
-        <div style={{ fontSize: 11, opacity: 0.75 }}>Workspace</div>
-        <div style={{ fontWeight: 700, fontSize: 13, marginTop: 2 }}>
-          {workspace?.name ?? "Workspace"}
-        </div>
-        <div style={{ fontSize: 11, opacity: 0.6, marginTop: 5 }}>
-          Status: <span style={{ fontWeight: 700, opacity: 1 }}>{workspace?.plan ?? "dev"}</span>
-        </div>
-      </div>
+      {/* Workspace selector */}
+      <WorkspaceSelector
+        workspace={workspace}
+        profile={profile}
+        createWorkspace={createWorkspace}
+        setActiveWorkspace={setActiveWorkspace}
+        saving={saving}
+      />
 
       {/* Nav */}
       <div style={{ overflowY: "auto", paddingRight: 4, height: "calc(100vh - 148px)" }}>
