@@ -101,6 +101,14 @@ class WorkspaceStore(ABC):
         dashboard load. Never returns raw tokens or marketplace credentials.
         """
 
+    @abstractmethod
+    def save_profile(self, *, user_sub: str, profile: dict) -> None:
+        """
+        Overwrite the stored profile for this user.
+        Caller must ensure get_or_create_profile was called first so the
+        storage record already exists. Never log profile contents.
+        """
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -110,6 +118,22 @@ class WorkspaceStore(ABC):
 def _sanitize_sub(user_sub: str) -> str:
     """Convert a Cognito sub to a safe path component (filesystem / secret name)."""
     return re.sub(r"[^a-zA-Z0-9\-]", "_", user_sub)
+
+
+def slugify_workspace_name(name: str) -> str:
+    """
+    Convert a workspace display name to a URL-safe slug.
+    Lowercase, alphanumeric and hyphens only, max 40 chars.
+    Used server-side only — the client never generates workspace IDs.
+
+      "Ethnic Musical Instruments"  →  "ethnic-musical-instruments"
+      "Roosters"                    →  "roosters"
+      "Copy & Paste LLC"            →  "copy-paste-llc"
+    """
+    slug = name.lower().strip()
+    slug = re.sub(r"[^a-z0-9]+", "-", slug)
+    slug = slug.strip("-")[:40]
+    return slug or "workspace"
 
 
 # ---------------------------------------------------------------------------
@@ -151,6 +175,14 @@ class LocalFileWorkspaceStore(WorkspaceStore):
         except OSError as exc:
             raise WorkspaceStorageError(f"Could not write workspace profile: {exc}") from exc
         return profile
+
+    def save_profile(self, *, user_sub: str, profile: dict) -> None:
+        p = self._path(user_sub)
+        try:
+            p.write_text(json.dumps(profile, indent=2), encoding="utf-8")
+            logger.debug("LocalFileWorkspaceStore: saved profile (sub=%s)", user_sub)
+        except OSError as exc:
+            raise WorkspaceStorageError(f"Could not write workspace profile: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -226,6 +258,11 @@ class SecretsManagerWorkspaceStore(WorkspaceStore):
             "SecretsManagerWorkspaceStore: created default profile (sub=%s)", user_sub,
         )
         return profile
+
+    def save_profile(self, *, user_sub: str, profile: dict) -> None:
+        name = self._secret_name(user_sub)
+        self._write_secret(name, profile, user_sub)
+        logger.debug("SecretsManagerWorkspaceStore: saved profile (sub=%s)", user_sub)
 
 
 # ---------------------------------------------------------------------------

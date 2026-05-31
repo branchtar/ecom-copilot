@@ -758,6 +758,142 @@ def get_workspaces(request: Request):
     # 4. Return safe profile only — no tokens, no marketplace credentials.
     return JSONResponse({"ok": True, "profile": profile})
 
+
+@app.post("/api/workspaces")
+async def create_workspace(request: Request):
+    """
+    Phase 3B-2: Append a new workspace to the user's profile.
+    Body: { "name": "Business Name" }
+    New workspaces start with marketplace_tenant_refs: {} — no marketplace connections.
+    active_workspace_id is NOT changed; user switches manually.
+    Returns: { "ok": true, "workspace": {...}, "profile": {...} }
+    """
+    # 1. Internal-key guard.
+    provided_key = (request.headers.get("x-ecom-internal-key") or "")
+    expected_key = (os.getenv("ECOM_INTERNAL_API_KEY") or "")
+    if not expected_key:
+        return JSONResponse({"ok": False, "error": "Workspaces endpoint not configured"}, status_code=503)
+    if not hmac.compare_digest(provided_key, expected_key):
+        logger.warning("create_workspace: invalid internal key")
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+
+    # 2. User sub.
+    user_sub = (request.headers.get("x-ecom-user-sub") or "").strip()
+    if not user_sub:
+        return JSONResponse({"ok": False, "error": "Missing X-Ecom-User-Sub"}, status_code=400)
+
+    # 3. Parse and validate name.
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "Invalid JSON body"}, status_code=400)
+
+    name = (body.get("name") or "").strip()
+    if len(name) < 2 or len(name) > 80:
+        return JSONResponse({"ok": False, "error": "name must be 2–80 characters"}, status_code=400)
+
+    # 4. Load profile (auto-creates if missing).
+    try:
+        store = _workspace.get_workspace_store()
+        profile = store.get_or_create_profile(user_sub=user_sub, email="")
+    except _workspace.MissingConfigError as exc:
+        logger.error("create_workspace config error: %s", exc)
+        return JSONResponse({"ok": False, "error": "Server configuration error"}, status_code=500)
+    except _workspace.WorkspaceStorageError as exc:
+        logger.error("create_workspace storage error: %s", exc)
+        return JSONResponse({"ok": False, "error": "Could not load workspace profile"}, status_code=500)
+
+    # 5. Generate collision-safe slug (server-side — client never sends id).
+    existing_ids = {w["id"] for w in profile.get("workspaces", [])}
+    base_slug = _workspace.slugify_workspace_name(name)
+    slug = base_slug
+    counter = 2
+    while slug in existing_ids:
+        slug = f"{base_slug[:37]}-{counter}"
+        counter += 1
+
+    # 6. Build new workspace entry — empty marketplace refs, no active change.
+    new_workspace = {
+        "id": slug,
+        "name": name,
+        "plan": "dev",
+        "created_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "marketplace_tenant_refs": {},
+    }
+
+    # 7. Append and persist.
+    profile.setdefault("workspaces", [])
+    profile["workspaces"].append(new_workspace)
+
+    try:
+        store.save_profile(user_sub=user_sub, profile=profile)
+    except _workspace.WorkspaceStorageError as exc:
+        logger.error("create_workspace save error (sub=%s): %s", user_sub, exc)
+        return JSONResponse({"ok": False, "error": "Could not save workspace"}, status_code=500)
+
+    logger.info("create_workspace: created (sub=%s id=%s)", user_sub, slug)
+    return JSONResponse({"ok": True, "workspace": new_workspace, "profile": profile})
+
+
+@app.patch("/api/workspaces/active")
+async def set_active_workspace(request: Request):
+    """
+    Phase 3B-2: Switch the user's active workspace.
+    Body: { "workspace_id": "slug-id" }
+    Rejects unknown IDs with 404.
+    """
+    # 1. Internal-key guard.
+    provided_key = (request.headers.get("x-ecom-internal-key") or "")
+    expected_key = (os.getenv("ECOM_INTERNAL_API_KEY") or "")
+    if not expected_key:
+        return JSONResponse({"ok": False, "error": "Workspaces endpoint not configured"}, status_code=503)
+    if not hmac.compare_digest(provided_key, expected_key):
+        logger.warning("set_active_workspace: invalid internal key")
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+
+    # 2. User sub.
+    user_sub = (request.headers.get("x-ecom-user-sub") or "").strip()
+    if not user_sub:
+        return JSONResponse({"ok": False, "error": "Missing X-Ecom-User-Sub"}, status_code=400)
+
+    # 3. Parse body.
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "Invalid JSON body"}, status_code=400)
+
+    workspace_id = (body.get("workspace_id") or "").strip()
+    if not workspace_id:
+        return JSONResponse({"ok": False, "error": "workspace_id required"}, status_code=400)
+
+    # 4. Load profile.
+    try:
+        store = _workspace.get_workspace_store()
+        profile = store.get_or_create_profile(user_sub=user_sub, email="")
+    except _workspace.MissingConfigError as exc:
+        logger.error("set_active_workspace config error: %s", exc)
+        return JSONResponse({"ok": False, "error": "Server configuration error"}, status_code=500)
+    except _workspace.WorkspaceStorageError as exc:
+        logger.error("set_active_workspace storage error: %s", exc)
+        return JSONResponse({"ok": False, "error": "Could not load workspace profile"}, status_code=500)
+
+    # 5. Reject unknown workspace IDs.
+    valid_ids = {w["id"] for w in profile.get("workspaces", [])}
+    if workspace_id not in valid_ids:
+        return JSONResponse({"ok": False, "error": "Unknown workspace_id"}, status_code=404)
+
+    # 6. Update active and save.
+    profile["active_workspace_id"] = workspace_id
+
+    try:
+        store.save_profile(user_sub=user_sub, profile=profile)
+    except _workspace.WorkspaceStorageError as exc:
+        logger.error("set_active_workspace save error (sub=%s): %s", user_sub, exc)
+        return JSONResponse({"ok": False, "error": "Could not save workspace"}, status_code=500)
+
+    logger.info("set_active_workspace: switched (sub=%s id=%s)", user_sub, workspace_id)
+    return JSONResponse({"ok": True, "active_workspace_id": workspace_id})
+
 # === EC_WORKSPACES_END ===
 
 
