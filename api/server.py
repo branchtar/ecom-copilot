@@ -894,6 +894,119 @@ async def set_active_workspace(request: Request):
     logger.info("set_active_workspace: switched (sub=%s id=%s)", user_sub, workspace_id)
     return JSONResponse({"ok": True, "active_workspace_id": workspace_id})
 
+
+@app.patch("/api/workspaces/marketplace-refs")
+async def update_marketplace_ref(request: Request):
+    """
+    Phase 3C-1: Set or update a marketplace tenant ref for the user's active workspace.
+
+    Body: { "marketplace": "amazon"|"shopify", "tenant_ref": "<slug>" }
+
+    Finds the user's active workspace by reading their profile, then sets
+    marketplace_tenant_refs[marketplace] = tenant_ref for that workspace only.
+    Does NOT change active_workspace_id or any other workspace field.
+
+    Called server-side from the Next.js /api/amazon/connect route before
+    redirecting the user to the Amazon OAuth authorize URL.
+
+    Returns safe metadata only — no tokens, no credentials.
+    """
+    # 1. Internal-key guard — constant-time compare, same as other workspace endpoints.
+    provided_key = (request.headers.get("x-ecom-internal-key") or "")
+    expected_key = (os.getenv("ECOM_INTERNAL_API_KEY") or "")
+    if not expected_key:
+        return JSONResponse({"ok": False, "error": "Workspaces endpoint not configured"}, status_code=503)
+    if not hmac.compare_digest(provided_key, expected_key):
+        logger.warning("update_marketplace_ref: invalid internal key")
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+
+    # 2. User sub — required; identifies which profile to update. Never logged.
+    user_sub = (request.headers.get("x-ecom-user-sub") or "").strip()
+    if not user_sub:
+        return JSONResponse({"ok": False, "error": "Missing X-Ecom-User-Sub"}, status_code=400)
+
+    # 3. Parse and validate body.
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "Invalid JSON body"}, status_code=400)
+
+    marketplace = (body.get("marketplace") or "").strip().lower()
+    if marketplace not in ("amazon", "shopify"):
+        return JSONResponse(
+            {"ok": False, "error": "marketplace must be 'amazon' or 'shopify'"},
+            status_code=400,
+        )
+
+    tenant_ref = (body.get("tenant_ref") or "").strip()
+
+    # Validate tenant_ref: lowercase alphanumeric and hyphens only, 1–60 chars,
+    # no leading or trailing hyphens. Matches slugify_workspace_name() output.
+    _SAFE = frozenset("abcdefghijklmnopqrstuvwxyz0123456789-")
+    if (
+        not tenant_ref
+        or len(tenant_ref) > 60
+        or not all(c in _SAFE for c in tenant_ref)
+        or tenant_ref.startswith("-")
+        or tenant_ref.endswith("-")
+    ):
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "tenant_ref must be a safe slug: lowercase alphanumeric and hyphens, 1–60 chars, no leading/trailing hyphens",
+            },
+            status_code=400,
+        )
+
+    # 4. Load the user's workspace profile. Idempotent — auto-creates if missing.
+    try:
+        store = _workspace.get_workspace_store()
+        profile = store.get_or_create_profile(user_sub=user_sub, email="")
+    except _workspace.MissingConfigError as exc:
+        logger.error("update_marketplace_ref config error: %s", exc)
+        return JSONResponse({"ok": False, "error": "Server configuration error"}, status_code=500)
+    except _workspace.WorkspaceStorageError as exc:
+        logger.error("update_marketplace_ref storage error: %s", exc)
+        return JSONResponse({"ok": False, "error": "Could not load workspace profile"}, status_code=500)
+
+    # 5. Find the active workspace.
+    active_id = profile.get("active_workspace_id")
+    target = next(
+        (ws for ws in profile.get("workspaces", []) if ws.get("id") == active_id),
+        None,
+    )
+    if target is None:
+        return JSONResponse(
+            {"ok": False, "error": "Active workspace not found in profile"},
+            status_code=404,
+        )
+
+    # 6. Set the marketplace ref. Idempotent — safe to call again with the same value.
+    target.setdefault("marketplace_tenant_refs", {})
+    target["marketplace_tenant_refs"][marketplace] = tenant_ref
+
+    # 7. Persist the updated profile.
+    try:
+        store.save_profile(user_sub=user_sub, profile=profile)
+    except _workspace.WorkspaceStorageError as exc:
+        logger.error(
+            "update_marketplace_ref save error (sub=%s workspace=%s): %s",
+            user_sub, active_id, exc,
+        )
+        return JSONResponse({"ok": False, "error": "Could not save workspace profile"}, status_code=500)
+
+    logger.info(
+        "update_marketplace_ref: %s=%s (sub=%s workspace=%s)",
+        marketplace, tenant_ref, user_sub, active_id,
+    )
+    # Return safe metadata only — no tokens, no credentials.
+    return JSONResponse({
+        "ok": True,
+        "workspace_id": active_id,
+        "marketplace": marketplace,
+        "tenant_ref": tenant_ref,
+    })
+
 # === EC_WORKSPACES_END ===
 
 

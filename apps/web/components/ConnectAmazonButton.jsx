@@ -1,26 +1,33 @@
 "use client";
 
-import { useSession } from "next-auth/react";
-
-export default function ConnectAmazonButton() {
-  const { data: session } = useSession();
-
+/**
+ * ConnectAmazonButton — Phase 3C-1
+ *
+ * Calls the Next.js /api/amazon/connect server route instead of FastAPI directly.
+ * The server route:
+ *   1. Validates the user's NextAuth/Cognito session.
+ *   2. Reads the active workspace's Amazon tenant ref from the workspace profile.
+ *   3. Pre-registers the ref for new workspaces (idempotent for existing ones).
+ *   4. Returns the Seller Central authorize_url for the correct tenant bucket.
+ *
+ * No tenant is hardcoded here. No FastAPI URL is called from the browser.
+ * No credentials or internal keys are exposed client-side.
+ *
+ * workspaceId prop is accepted for documentation / future use.
+ * The server route independently derives the active workspace from the user's session.
+ */
+export default function ConnectAmazonButton({ workspaceId }) {
   const onClick = async () => {
     try {
-      const base = process.env.NEXT_PUBLIC_API_BASE_URL || "https://5xhzibtfry.us-east-1.awsapprunner.com";
-      if (!base) throw new Error("NEXT_PUBLIC_API_BASE_URL not set");
-
-      // Start OAuth flow by asking API for authorize_url
-      const resp = await fetch(`${base}/api/integrations/amazon/start?tenant=dev`, {
+      // Session-validated, workspace-scoped — server determines the correct tenant.
+      const resp = await fetch("/api/amazon/connect", {
         method: "GET",
-        headers: session?.accessToken
-          ? { Authorization: `Bearer ${session.accessToken}` }
-          : {},
+        cache: "no-store",
       });
 
       const data = await resp.json();
 
-      if (!resp.ok) {
+      if (!resp.ok || !data?.ok) {
         throw new Error(data?.error || `HTTP ${resp.status}`);
       }
 
