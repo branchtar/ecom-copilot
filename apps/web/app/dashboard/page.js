@@ -392,10 +392,14 @@ export default function DashboardPage() {
   }, [apiBase, shopifyTenant]);
 
   // ── Amazon orders — fires only when Amazon is connected ──────────────
+  // Phase 3C-1: uses the active workspace's amazon tenant ref, not hardcoded "dev".
+  // If amazonTenant is null the workspace has no Amazon connection — skip fetch so
+  // a new workspace never shows Bwaaack's dev orders.
   useEffect(() => {
     if (amazonStatus.loading || !amazonStatus.connected) return;
+    if (!amazonTenant) return;
     setAmazonOrders({ loading: true, orders: [], error: null });
-    fetch("/api/amazon/orders?tenant=dev&days=30&max_results=50", { cache: "no-store" })
+    fetch(`/api/amazon/orders?tenant=${encodeURIComponent(amazonTenant)}&days=30&max_results=50`, { cache: "no-store" })
       .then((r) => r.json())
       .then((data) => {
         if (data.ok) {
@@ -405,7 +409,7 @@ export default function DashboardPage() {
         }
       })
       .catch(() => setAmazonOrders({ loading: false, orders: [], error: "Could not reach orders API" }));
-  }, [amazonStatus.connected, amazonStatus.loading]);
+  }, [amazonStatus.connected, amazonStatus.loading, amazonTenant]);
 
   // ── Derived style values ─────────────────────────────────────────────────
   const dotColor =
@@ -653,7 +657,7 @@ export default function DashboardPage() {
                 </div>
               )}
               {!amazonStatus.loading && !amazonStatus.connected && (
-                <ConnectAmazonButton />
+                <ConnectAmazonButton workspaceId={workspace?.id} />
               )}
             </MarketplaceCard>
 
