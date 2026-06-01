@@ -46,7 +46,7 @@ logger = logging.getLogger("ecom_navigation.workspace_store")
 # ---------------------------------------------------------------------------
 
 _DEFAULT_WORKSPACE_ID = "bwaaack"
-_DEFAULT_WORKSPACE_NAME = "Bwaaack / Copy & Paste LLC"
+_DEFAULT_WORKSPACE_NAME = "Bwaaack"
 
 
 def _make_default_profile(user_sub: str, email: str) -> dict:
