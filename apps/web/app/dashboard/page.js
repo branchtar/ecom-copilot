@@ -350,6 +350,9 @@ export default function DashboardPage() {
 
   // ── Amazon connection status ─────────────────────────────────────────────
   useEffect(() => {
+    // Immediately clear stale data on every tenant ref change so the previous
+    // workspace's seller ID never persists visibly during a workspace switch.
+    setAmazonStatus({ loading: true, connected: false, selling_partner_id: null });
     if (!apiBase) {
       setAmazonStatus({ loading: false, connected: false, selling_partner_id: null });
       return;
@@ -372,6 +375,8 @@ export default function DashboardPage() {
 
   // ── Shopify connection status ─────────────────────────────────────────────
   useEffect(() => {
+    // Immediately clear stale data on every tenant ref change.
+    setShopifyStatus({ loading: true, connected: false, shop: null });
     if (!apiBase) {
       setShopifyStatus({ loading: false, connected: false, shop: null });
       return;
@@ -697,6 +702,85 @@ export default function DashboardPage() {
               statusBadge={comingSoonBadge}
               faded
             />
+          </div>
+        </div>
+
+        {/* ── Connection Diagnostics ─────────────────────────────────────── */}
+        {/* Safe metadata only — no tokens, secrets, or internal keys.       */}
+        {/* All values from existing state; zero new API calls.               */}
+        <div style={{ marginTop: 12 }}>
+          <div style={{
+            border: "1px solid var(--ec-border)",
+            borderRadius: "var(--ec-radius)",
+            background: "var(--ec-surface)",
+            boxShadow: "var(--ec-shadow-xs)",
+            padding: "12px 16px",
+          }}>
+            <div style={{
+              fontSize: 10, fontWeight: 700,
+              textTransform: "uppercase", letterSpacing: "0.08em",
+              color: "var(--ec-text-muted)", marginBottom: 10,
+            }}>
+              Connection Diagnostics
+            </div>
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "max-content 1fr",
+              rowGap: 5, columnGap: 20, fontSize: 12,
+              alignItems: "baseline",
+            }}>
+              <span style={{ color: "var(--ec-text-muted)", fontWeight: 600 }}>Workspace</span>
+              <span style={{ color: "var(--ec-text)" }}>
+                {workspace?.name ?? "—"}
+                {" "}
+                <span style={{
+                  fontFamily: "ui-monospace, 'Cascadia Code', monospace",
+                  fontSize: 10, color: "var(--ec-text-subtle)",
+                }}>
+                  ({workspace?.id ?? "—"})
+                </span>
+              </span>
+
+              <span style={{ color: "var(--ec-text-muted)", fontWeight: 600 }}>Amazon ref</span>
+              <span style={{
+                fontFamily: "ui-monospace, 'Cascadia Code', monospace", fontSize: 11,
+                color: amazonTenant ? "var(--ec-text)" : "var(--ec-text-subtle)",
+              }}>
+                {amazonTenant ?? "not set"}
+              </span>
+
+              <span style={{ color: "var(--ec-text-muted)", fontWeight: 600 }}>Amazon ID</span>
+              <span style={{
+                fontFamily: "ui-monospace, 'Cascadia Code', monospace", fontSize: 11,
+                color: "var(--ec-text)",
+              }}>
+                {amazonStatus.loading
+                  ? "Checking…"
+                  : amazonStatus.connected && amazonStatus.selling_partner_id
+                    ? amazonStatus.selling_partner_id
+                    : "Not connected"}
+              </span>
+
+              <span style={{ color: "var(--ec-text-muted)", fontWeight: 600 }}>Shopify ref</span>
+              <span style={{
+                fontFamily: "ui-monospace, 'Cascadia Code', monospace", fontSize: 11,
+                color: shopifyTenant ? "var(--ec-text)" : "var(--ec-text-subtle)",
+              }}>
+                {shopifyTenant ?? "not set"}
+              </span>
+
+              <span style={{ color: "var(--ec-text-muted)", fontWeight: 600 }}>Shopify shop</span>
+              <span style={{
+                fontFamily: "ui-monospace, 'Cascadia Code', monospace", fontSize: 11,
+                color: "var(--ec-text)",
+              }}>
+                {shopifyStatus.loading
+                  ? "Checking…"
+                  : shopifyStatus.connected && shopifyStatus.shop
+                    ? shopifyStatus.shop
+                    : "Not connected"}
+              </span>
+            </div>
           </div>
         </div>
 
