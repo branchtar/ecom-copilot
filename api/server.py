@@ -22,6 +22,7 @@ from amazon_oauth import (
     get_connection_store,
 )
 
+import amazon_finances as _amazon_finances
 import amazon_orders as _amazon_orders
 import shopify_oauth as _shopify
 import workspace_store as _workspace
@@ -361,6 +362,104 @@ def amazon_orders_list(
     })
 
 # === EC_AMAZON_ORDERS_END ===
+
+# === EC_AMAZON_FINANCE_START ===
+# Amazon Finance Snapshot (read-only, safe metadata only).
+#
+# Security model:
+#   * Caller MUST supply X-Ecom-Internal-Key matching ECOM_INTERNAL_API_KEY.
+#   * This endpoint is NOT meant to be called from the browser directly.
+#   * The Next.js server route /api/amazon/finance/summary validates the user's
+#     NextAuth/Cognito session before proxying here with the internal key.
+#   * NEVER log the internal key or the SP-API access token.
+
+@app.get("/api/integrations/amazon/finance/summary")
+def amazon_finance_summary(
+    request: Request,
+    tenant: str = "dev",
+    days: int = 90,
+):
+    # 1. Internal-key guard — constant-time compare to prevent timing attacks.
+    provided_key = (request.headers.get("x-ecom-internal-key") or "")
+    expected_key = (os.getenv("ECOM_INTERNAL_API_KEY") or "")
+    if not expected_key:
+        logger.error("ECOM_INTERNAL_API_KEY is not set — finance endpoint is disabled")
+        return JSONResponse({"ok": False, "error": "Finance endpoint not configured"}, status_code=503)
+    if not hmac.compare_digest(provided_key, expected_key):
+        logger.warning("amazon_finance_summary: invalid internal key (tenant=%s)", tenant)
+        return JSONResponse(
+            {"ok": False, "error": "Unauthorized", "error_code": "unauthorized"},
+            status_code=401,
+        )
+
+    # 2. Clamp days to 1–90.
+    days_clamped = max(1, min(int(days), 90))
+
+    # 3. Check connection metadata (safe — never returns tokens).
+    try:
+        store = get_connection_store()
+        meta  = store.get_connection_meta(tenant=tenant)
+    except (MissingConfigError, ConnectionStorageError, AmazonOAuthError) as exc:
+        logger.error("amazon_finance_summary: store error (tenant=%s): %s", tenant, exc)
+        return JSONResponse(
+            {"ok": False, "connected": False, "tenant": tenant,
+             "error_code": "no_connection", "error": str(exc)},
+            status_code=502,
+        )
+
+    if meta is None:
+        return JSONResponse(
+            {"ok": False, "connected": False, "tenant": tenant,
+             "error_code": "no_connection",
+             "error": "No Amazon connection found for this tenant."},
+            status_code=200,
+        )
+
+    selling_partner_id = meta.get("selling_partner_id")
+
+    # 4. Obtain a valid access token (refresh if near-expiry).
+    try:
+        access_token = _amazon_orders.get_valid_access_token(tenant)
+    except _amazon_orders.AmazonOrdersError as exc:
+        logger.error("amazon_finance_summary: token error (tenant=%s): %s", tenant, exc)
+        return JSONResponse(
+            {"ok": False, "connected": True, "tenant": tenant,
+             "selling_partner_id": selling_partner_id,
+             "error_code": "token_refresh_failed", "error": str(exc)},
+            status_code=502,
+        )
+
+    # 5. Fetch financial event groups from SP-API.
+    try:
+        raw_groups = _amazon_finances.fetch_financial_event_groups(
+            access_token, days=days_clamped
+        )
+    except _amazon_finances.FinanceRoleError:
+        logger.warning(
+            "amazon_finance_summary: Finance role not approved (tenant=%s)", tenant
+        )
+        return JSONResponse(
+            {"ok": False, "connected": True, "tenant": tenant,
+             "selling_partner_id": selling_partner_id,
+             "error_code": "missing_finance_role",
+             "error": "Finance data requires the Finance and Accounting SP-API role."},
+            status_code=200,
+        )
+    except _amazon_finances.FinanceFetchError as exc:
+        logger.error("amazon_finance_summary: fetch error (tenant=%s): %s", tenant, exc)
+        return JSONResponse(
+            {"ok": False, "connected": True, "tenant": tenant,
+             "selling_partner_id": selling_partner_id,
+             "error_code": "spapi_error", "error": str(exc)},
+            status_code=502,
+        )
+
+    # 6. Normalize and build summary.
+    groups  = [_amazon_finances.normalize_group(g) for g in raw_groups]
+    summary = _amazon_finances.build_finance_summary(tenant, selling_partner_id, groups)
+    return JSONResponse(summary)
+
+# === EC_AMAZON_FINANCE_END ===
 
 
 # =============================================================================

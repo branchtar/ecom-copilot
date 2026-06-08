@@ -331,6 +331,12 @@ export default function DashboardPage() {
     orders: [],
     error: null,
   });
+  const [financeData, setFinanceData] = useState({
+    loading: false,
+    data: null,
+    error: null,
+    errorCode: null,
+  });
 
   // ── Health check — logic preserved exactly ───────────────────────────────
   useEffect(() => {
@@ -416,6 +422,40 @@ export default function DashboardPage() {
       .catch(() => setAmazonOrders({ loading: false, orders: [], error: "Could not reach orders API" }));
   }, [amazonStatus.connected, amazonStatus.loading, amazonTenant]);
 
+  // ── Amazon Finance Snapshot — fires only when Amazon is connected ─────────
+  // Uses the active workspace's amazonTenant ref, same pattern as orders.
+  // If amazonTenant is null the workspace has no Amazon connection — skip fetch.
+  useEffect(() => {
+    if (amazonStatus.loading || !amazonStatus.connected) return;
+    if (!amazonTenant) return;
+    setFinanceData({ loading: true, data: null, error: null, errorCode: null });
+    fetch(
+      `/api/amazon/finance/summary?tenant=${encodeURIComponent(amazonTenant)}&days=90`,
+      { cache: "no-store" }
+    )
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.ok) {
+          setFinanceData({ loading: false, data: d, error: null, errorCode: null });
+        } else {
+          setFinanceData({
+            loading: false,
+            data: null,
+            error: d.error || "Failed to load finance data",
+            errorCode: d.error_code || null,
+          });
+        }
+      })
+      .catch(() =>
+        setFinanceData({
+          loading: false,
+          data: null,
+          error: "Could not reach finance API",
+          errorCode: null,
+        })
+      );
+  }, [amazonStatus.connected, amazonStatus.loading, amazonTenant]);
+
   // ── Derived style values ─────────────────────────────────────────────────
   const dotColor =
     apiStatus === "Online"  ? "var(--ec-success)" :
@@ -492,6 +532,208 @@ export default function DashboardPage() {
       Not connected
     </div>
   );
+
+  // ── Amazon Finance Snapshot panel ────────────────────────────────────────
+  function AmazonFinancePanel({ amazonConnected, amazonLoading, finance }) {
+    const panelBase = {
+      marginTop: 12,
+      border: "1px solid var(--ec-border)",
+      borderRadius: "var(--ec-radius)",
+      background: "var(--ec-surface)",
+      boxShadow: "var(--ec-shadow-sm)",
+      padding: "16px 18px",
+    };
+    const labelStyle = {
+      fontSize: 10, fontWeight: 700,
+      textTransform: "uppercase", letterSpacing: "0.08em",
+      color: "var(--ec-text-muted)", marginBottom: 12,
+    };
+
+    // Don't render until Amazon connection status is resolved.
+    if (amazonLoading) return null;
+
+    if (!amazonConnected) {
+      return (
+        <div style={panelBase}>
+          <div style={labelStyle}>Amazon Finance Snapshot</div>
+          <div style={{ fontSize: 13, color: "var(--ec-text-subtle)" }}>
+            Connect Amazon to view finance snapshot.
+          </div>
+        </div>
+      );
+    }
+
+    if (finance.loading) {
+      return (
+        <div style={panelBase}>
+          <div style={labelStyle}>Amazon Finance Snapshot</div>
+          <div style={{ fontSize: 13, color: "var(--ec-text-subtle)" }}>
+            Loading finance snapshot…
+          </div>
+        </div>
+      );
+    }
+
+    if (finance.errorCode === "missing_finance_role") {
+      return (
+        <div style={{ ...panelBase, borderColor: "var(--ec-caution)", background: "var(--ec-caution-bg)" }}>
+          <div style={{ ...labelStyle, color: "var(--ec-caution)" }}>Amazon Finance Snapshot</div>
+          <div style={{ fontSize: 13, color: "var(--ec-caution)" }}>
+            Finance data requires Amazon Finance and Accounting role approval.
+          </div>
+        </div>
+      );
+    }
+
+    if (finance.error) {
+      return (
+        <div style={panelBase}>
+          <div style={labelStyle}>Amazon Finance Snapshot</div>
+          <div style={{ fontSize: 13, color: "var(--ec-danger)" }}>
+            Finance data temporarily unavailable.
+          </div>
+        </div>
+      );
+    }
+
+    if (!finance.data) return null;
+
+    const d = finance.data;
+    const closed = d.latest_closed_group;
+    const open   = d.latest_open_group;
+    const recent = d.recent_groups || [];
+
+    function fmtDate(iso) {
+      if (!iso) return "—";
+      return iso.slice(0, 10);
+    }
+    function fmtAmount(amount, currency) {
+      if (amount == null) return "—";
+      return `${currency || ""} ${parseFloat(amount).toFixed(2)}`.trim();
+    }
+
+    return (
+      <div style={panelBase}>
+        <div style={labelStyle}>Amazon Finance Snapshot</div>
+
+        {/* Latest closed payout + open settlement */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
+          <div style={{
+            border: "1px solid var(--ec-border)", borderRadius: "var(--ec-radius-sm)",
+            padding: "10px 13px", background: "var(--ec-bg)",
+          }}>
+            <div style={{
+              fontSize: 10, fontWeight: 700, textTransform: "uppercase",
+              letterSpacing: "0.07em", color: "var(--ec-text-muted)", marginBottom: 4,
+            }}>
+              Latest Payout (Closed)
+            </div>
+            {closed ? (
+              <>
+                <div style={{ fontSize: 18, fontWeight: 800, color: "var(--ec-text)", lineHeight: 1.1 }}>
+                  {fmtAmount(closed.original_total, d.currency)}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--ec-text-muted)", marginTop: 4 }}>
+                  {fmtDate(closed.begin_date)} – {fmtDate(closed.end_date)}
+                </div>
+                {closed.fund_transfer_status && (
+                  <div style={{
+                    display: "inline-flex", alignItems: "center", gap: 4, marginTop: 5,
+                    fontSize: 11, fontWeight: 600,
+                    color: closed.fund_transfer_status === "Successful"
+                      ? "var(--ec-success-text)" : "var(--ec-caution)",
+                    background: closed.fund_transfer_status === "Successful"
+                      ? "var(--ec-success-bg)" : "var(--ec-caution-bg)",
+                    padding: "2px 8px", borderRadius: 999,
+                  }}>
+                    {closed.fund_transfer_status === "Successful" ? "✓" : "!"}{" "}
+                    {closed.fund_transfer_status}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div style={{ fontSize: 12, color: "var(--ec-text-subtle)", marginTop: 4 }}>
+                No closed groups in range
+              </div>
+            )}
+          </div>
+
+          <div style={{
+            border: "1px solid var(--ec-border)", borderRadius: "var(--ec-radius-sm)",
+            padding: "10px 13px", background: "var(--ec-bg)",
+          }}>
+            <div style={{
+              fontSize: 10, fontWeight: 700, textTransform: "uppercase",
+              letterSpacing: "0.07em", color: "var(--ec-text-muted)", marginBottom: 4,
+            }}>
+              Open Settlement
+            </div>
+            {open ? (
+              <>
+                <div style={{ fontSize: 18, fontWeight: 800, color: "var(--ec-text-muted)", lineHeight: 1.1 }}>
+                  In Progress
+                </div>
+                <div style={{ fontSize: 11, color: "var(--ec-text-muted)", marginTop: 4 }}>
+                  Since {fmtDate(open.begin_date)}
+                </div>
+              </>
+            ) : (
+              <div style={{ fontSize: 12, color: "var(--ec-text-subtle)", marginTop: 4 }}>
+                No open group
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Recent settlement groups */}
+        {recent.length > 0 ? (
+          <div style={{ marginBottom: 12 }}>
+            <div style={{
+              fontSize: 10, fontWeight: 600, color: "var(--ec-text-muted)",
+              textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 6,
+            }}>
+              Recent Settlement Groups
+            </div>
+            <div style={{
+              display: "grid", gridTemplateColumns: "64px 1fr auto",
+              rowGap: 6, columnGap: 12, fontSize: 12,
+            }}>
+              {recent.flatMap((g, i) => [
+                <div key={`s-${i}`}>
+                  <span style={{
+                    padding: "1px 7px", borderRadius: 999, fontSize: 10, fontWeight: 600,
+                    background: g.status === "Closed" ? "var(--ec-success-bg)" : "var(--ec-border-light)",
+                    color: g.status === "Closed" ? "var(--ec-success-text)" : "var(--ec-text-muted)",
+                  }}>
+                    {g.status}
+                  </span>
+                </div>,
+                <div key={`d-${i}`} style={{ color: "var(--ec-text-muted)" }}>
+                  {fmtDate(g.begin_date)}
+                  {g.end_date ? ` – ${fmtDate(g.end_date)}` : " – present"}
+                </div>,
+                <div key={`a-${i}`} style={{ fontWeight: 600, color: "var(--ec-text)", textAlign: "right" }}>
+                  {g.original_total != null ? fmtAmount(g.original_total, d.currency) : "Pending"}
+                </div>,
+              ])}
+            </div>
+          </div>
+        ) : (
+          <div style={{ fontSize: 12, color: "var(--ec-text-subtle)", marginBottom: 12 }}>
+            No settlement groups found in the last 90 days.
+          </div>
+        )}
+
+        {/* Warning */}
+        <div style={{
+          fontSize: 11, color: "var(--ec-text-subtle)", lineHeight: 1.5,
+          borderTop: "1px solid var(--ec-border)", paddingTop: 10,
+        }}>
+          ⚠ {d.warnings?.[0]}
+        </div>
+      </div>
+    );
+  }
 
   // ── Render ───────────────────────────────────────────────────────────────
   return (
@@ -783,6 +1025,13 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
+
+        {/* ── Amazon Finance Snapshot ─────────────────────────────────────── */}
+        <AmazonFinancePanel
+          amazonConnected={amazonStatus.connected}
+          amazonLoading={amazonStatus.loading}
+          finance={financeData}
+        />
 
         {/* ── Amazon Recent Orders ────────────────────────────────────────── */}
         {/* Only renders when Amazon is connected; hides entirely otherwise. */}
