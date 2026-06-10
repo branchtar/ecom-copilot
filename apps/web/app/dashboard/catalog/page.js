@@ -130,7 +130,7 @@ function persistMapping(supplier, filename, colMap) {
   } catch {}
 }
 
-// ─── Row warning logic ────────────────────────────────────────────────────────
+// ─── Row warning logic (Phase 4B — column mapping preview) ───────────────────
 function getRowWarnings(rowArr, headers, colMap) {
   function val(key) {
     const h = colMap[key];
@@ -151,6 +151,73 @@ function getRowWarnings(rowArr, headers, colMap) {
                                                     warnings.push({ label: "No weight",     sev: "caution" });
   if (colMap.upc && upc && !/^\d{12,13}$/.test(upc.replace(/\D/g, "")))
                                                     warnings.push({ label: "Check UPC",     sev: "caution" });
+  return warnings;
+}
+
+// ─── Pricing estimate row warnings (Phase 4C) ────────────────────────────────
+// Separate from getRowWarnings — adds pricing-specific checks against engine results.
+function getPricingRowWarnings(row, result, rules, colMap, headers) {
+  function cell(key) {
+    const h = colMap[key];
+    if (!h) return "";
+    const i = headers.indexOf(h);
+    return i >= 0 ? (row[i] ?? "").trim() : "";
+  }
+  const warnings = [];
+  const sku     = cell("supplier_sku");
+  const costRaw = cell("item_cost");
+  const upc     = cell("upc");
+  const mapRaw  = cell("map_price");
+
+  if (!sku) warnings.push({ label: "Missing SKU", sev: "danger" });
+
+  const costNum = parseFloat(costRaw);
+  const hasCost = costRaw && !isNaN(costNum) && costNum > 0;
+  if (!hasCost) {
+    warnings.push({ label: "Missing Cost", sev: "danger" });
+    warnings.push({ label: "Pricing N/A",  sev: "danger" });
+    // UPC check still runs regardless
+    if (colMap.upc && upc && !/^\d{12,13}$/.test(upc.replace(/\D/g, ""))) {
+      warnings.push({ label: "Check UPC", sev: "caution" });
+    }
+    return warnings; // no price-based checks without a valid cost
+  }
+
+  // Weight
+  const weightRaw = cell("weight");
+  if (!colMap.weight || !weightRaw || parseFloat(weightRaw) <= 0) {
+    warnings.push({ label: "No Weight", sev: "caution" });
+  }
+
+  // Dimensions
+  if (!colMap.length || !colMap.width || !colMap.height) {
+    warnings.push({ label: "No Dimensions", sev: "caution" });
+  }
+
+  // UPC format (from Phase 4B)
+  if (colMap.upc && upc && !/^\d{12,13}$/.test(upc.replace(/\D/g, ""))) {
+    warnings.push({ label: "Check UPC", sev: "caution" });
+  }
+
+  // Price-based warnings (require a valid engine result)
+  if (result && result.prices) {
+    const sell   = result.prices.sell_price  ?? 0;
+    const total  = result.costs?.total_cost  ?? 0;
+    const net    = sell - total;
+    const minNet = parseFloat(rules.min_net_profit) || 0;
+
+    if (minNet > 0 && net < minNet) {
+      warnings.push({ label: "Below Min Net", sev: "danger" });
+    }
+
+    if (rules.warn_map && colMap.map_price && mapRaw) {
+      const mapNum = parseFloat(mapRaw.replace(/[^0-9.]/g, ""));
+      if (!isNaN(mapNum) && mapNum > 0 && sell < mapNum) {
+        warnings.push({ label: "Below MAP", sev: "caution" });
+      }
+    }
+  }
+
   return warnings;
 }
 
@@ -388,12 +455,265 @@ function WarnChip({ label, sev }) {
   );
 }
 
+// ─── Pricing rules input form (Phase 4C) ─────────────────────────────────────
+function PricingRulesCard({ rules, onChange }) {
+  function set(key, value) {
+    onChange((prev) => ({ ...prev, [key]: value }));
+  }
+
+  const labelSt = {
+    display:       "block",
+    fontSize:      11,
+    fontWeight:    600,
+    color:         "var(--ec-text-muted)",
+    textTransform: "uppercase",
+    letterSpacing: "0.07em",
+    marginBottom:  5,
+  };
+
+  return (
+    <div style={{
+      display:             "grid",
+      gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
+      gap:                 12,
+      marginBottom:        14,
+    }}>
+      {/* Marketplace */}
+      <div>
+        <label style={labelSt}>Marketplace</label>
+        <select
+          value={rules.marketplace}
+          onChange={(e) => set("marketplace", e.target.value)}
+          style={selectStyle}
+        >
+          <option value="amazon">Amazon</option>
+          <option value="walmart">Walmart</option>
+          <option value="shopify">Shopify</option>
+        </select>
+      </div>
+
+      {/* Handling Fee */}
+      <div>
+        <label style={labelSt}>Handling Fee ($)</label>
+        <input
+          type="number"
+          min="0"
+          step="0.01"
+          value={rules.handling_fee}
+          onChange={(e) => set("handling_fee", e.target.value)}
+          placeholder="0.00"
+          style={inputStyle}
+        />
+      </div>
+
+      {/* Dropship Fee */}
+      <div>
+        <label style={labelSt}>Dropship Fee ($)</label>
+        <input
+          type="number"
+          min="0"
+          step="0.01"
+          value={rules.dropship_fee}
+          onChange={(e) => set("dropship_fee", e.target.value)}
+          placeholder="0.00"
+          style={inputStyle}
+        />
+      </div>
+
+      {/* Misc Fee */}
+      <div>
+        <label style={labelSt}>Misc Fee ($)</label>
+        <input
+          type="number"
+          min="0"
+          step="0.01"
+          value={rules.misc_fee}
+          onChange={(e) => set("misc_fee", e.target.value)}
+          placeholder="0.00"
+          style={inputStyle}
+        />
+      </div>
+
+      {/* Min Net Profit threshold — warning only, not enforced by engine */}
+      <div>
+        <label style={labelSt}>Min Net Profit ($)</label>
+        <input
+          type="number"
+          min="0"
+          step="0.01"
+          value={rules.min_net_profit}
+          onChange={(e) => set("min_net_profit", e.target.value)}
+          placeholder="0.00"
+          style={inputStyle}
+        />
+      </div>
+
+      {/* MAP warning checkbox */}
+      <div style={{ display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>
+        <label style={{
+          display:       "flex",
+          alignItems:    "center",
+          gap:           7,
+          fontSize:      13,
+          color:         "var(--ec-text)",
+          cursor:        "pointer",
+          paddingBottom: 9,
+        }}>
+          <input
+            type="checkbox"
+            checked={rules.warn_map}
+            onChange={(e) => set("warn_map", e.target.checked)}
+            style={{ width: 14, height: 14, cursor: "pointer" }}
+          />
+          Warn below MAP
+        </label>
+      </div>
+    </div>
+  );
+}
+
+// ─── Pricing estimate results table (Phase 4C) ───────────────────────────────
+function PricingResultsTable({ results, previewRows, columnMap, headers, pricingRules }) {
+  function usd(n) {
+    if (n == null || isNaN(n)) return "—";
+    return "$" + Number(n).toFixed(2);
+  }
+  function pct(n) {
+    if (n == null || isNaN(n)) return "—";
+    return Number(n).toFixed(1) + "%";
+  }
+
+  return (
+    <div style={{ marginTop: 18 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ec-text)", marginBottom: 10 }}>
+        Pricing Estimate Results
+      </div>
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <thead>
+            <tr>
+              <th style={{ ...thStyle, width: 28 }}>#</th>
+              <th style={thStyle}>SKU</th>
+              <th style={{ ...thStyle, maxWidth: 160 }}>Title</th>
+              <th style={thStyle}>Item Cost</th>
+              <th style={thStyle}>Shipping Est.</th>
+              <th style={thStyle}>Mktpl. Fee †</th>
+              <th style={thStyle}>Total Cost</th>
+              <th style={thStyle}>Sell Price ‡</th>
+              <th style={thStyle}>Net Profit</th>
+              <th style={{ ...thStyle, whiteSpace: "normal", lineHeight: 1.3 }}>ROI % §</th>
+              <th style={thStyle}>Warnings</th>
+            </tr>
+          </thead>
+          <tbody>
+            {previewRows.map((row, i) => {
+              const result     = results[i] ?? null;
+              const w          = getPricingRowWarnings(row, result, pricingRules, columnMap, headers);
+              const hasDanger  = w.some((x) => x.sev === "danger");
+              const isPricingNA = w.some((x) => x.label === "Pricing N/A");
+
+              function cell(key) {
+                const h = columnMap[key];
+                if (!h) return "";
+                const idx = headers.indexOf(h);
+                return idx >= 0 ? (row[idx] ?? "").trim() : "";
+              }
+
+              const sku   = cell("supplier_sku") || "—";
+              const title = cell("title")         || "—";
+              const sell  = result?.prices?.sell_price              ?? null;
+              const total = result?.costs?.total_cost               ?? null;
+              const ship  = result?.components?.calculated_shipping ?? null;
+              const mktpl = result?.components?.marketplace_fee     ?? null;
+              const cost  = result?.inputs?.item_cost               ?? null;
+              const roi   = result?.roi?.roi_percent                ?? null;
+              const net   = (sell != null && total != null) ? sell - total : null;
+
+              const na = <span style={{ color: "var(--ec-text-subtle)" }}>—</span>;
+
+              return (
+                <tr
+                  key={i}
+                  style={{
+                    borderTop:  "1px solid var(--ec-border)",
+                    background: hasDanger ? "rgba(220,38,38,0.025)" : "transparent",
+                  }}
+                >
+                  <td style={{ ...tdStyle, color: "var(--ec-text-subtle)" }}>{i + 1}</td>
+
+                  <td style={{ ...tdStyle, fontFamily: "monospace", fontSize: 11 }}>{sku}</td>
+
+                  <td
+                    style={{
+                      ...tdStyle,
+                      maxWidth:     160,
+                      overflow:     "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace:   "nowrap",
+                    }}
+                    title={title}
+                  >
+                    {title}
+                  </td>
+
+                  <td style={tdStyle}>
+                    {isPricingNA ? <span style={{ color: "var(--ec-text-subtle)" }}>N/A</span> : usd(cost)}
+                  </td>
+
+                  <td style={tdStyle}>{isPricingNA ? na : usd(ship)}</td>
+
+                  <td style={tdStyle}>{isPricingNA ? na : usd(mktpl)}</td>
+
+                  <td style={tdStyle}>{isPricingNA ? na : usd(total)}</td>
+
+                  <td style={{ ...tdStyle, fontWeight: 600 }}>
+                    {isPricingNA
+                      ? <span style={{ color: "var(--ec-text-subtle)" }}>N/A</span>
+                      : usd(sell)
+                    }
+                  </td>
+
+                  <td style={{
+                    ...tdStyle,
+                    fontWeight: 600,
+                    color: isPricingNA      ? "var(--ec-text-subtle)"
+                         : net != null && net < 0 ? "var(--ec-danger)"
+                         : "var(--ec-success-text)",
+                  }}>
+                    {isPricingNA ? "N/A" : usd(net)}
+                  </td>
+
+                  <td style={tdStyle}>{isPricingNA ? na : pct(roi)}</td>
+
+                  <td style={tdStyle}>
+                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap", minWidth: 80 }}>
+                      {w.length === 0
+                        ? <span style={{ color: "var(--ec-text-subtle)", fontSize: 10 }}>—</span>
+                        : w.map((x) => <WarnChip key={x.label} label={x.label} sev={x.sev} />)
+                      }
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div style={{ fontSize: 10, color: "var(--ec-text-subtle)", marginTop: 6, lineHeight: 1.6 }}>
+        † Amazon fee estimate only — actual Amazon referral fees are category-based and may differ significantly.{" "}
+        ‡ Recommended price estimate based on configured markup — verify before use.{" "}
+        § ROI % excludes marketplace fee (engine design). Net Profit = Sell Price − Total Cost.
+      </div>
+    </div>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function CatalogPage() {
   const { workspace, profile, saving, createWorkspace, setActiveWorkspace } = useWorkspace();
   const fileInputRef = useRef(null);
 
-  // Wizard state
+  // ── Wizard state ────────────────────────────────────────────────────────────
   const [step,             setStep]             = useState(1);
   const [suppliers,        setSuppliers]        = useState([]);
   const [selectedSupplier, setSelectedSupplier] = useState(null); // { id?, name }
@@ -403,6 +723,19 @@ export default function CatalogPage() {
   const [isDragOver,       setIsDragOver]       = useState(false);
   const [columnMap,        setColumnMap]        = useState({});
   const [restoredNotice,   setRestoredNotice]   = useState(false);
+
+  // ── Pricing estimate state (Phase 4C) ───────────────────────────────────────
+  const [pricingRules,   setPricingRules]   = useState({
+    marketplace:    "amazon",
+    handling_fee:   "",
+    dropship_fee:   "",
+    misc_fee:       "",
+    min_net_profit: "",
+    warn_map:       true,
+  });
+  const [pricingResults, setPricingResults] = useState(null);  // null = not run
+  const [pricingLoading, setPricingLoading] = useState(false);
+  const [pricingError,   setPricingError]   = useState(null);
 
   // Hydrate supplier list from Supplier Directory (read-only)
   useEffect(() => { setSuppliers(loadSavedSuppliers()); }, []);
@@ -483,6 +816,23 @@ export default function CatalogPage() {
     if (!canPreview) return;
     persistMapping(selectedSupplier, csvData.name, columnMap);
     setRestoredNotice(false);
+    // Clear any stale pricing results when mapping is confirmed
+    setPricingResults(null);
+    setPricingError(null);
+    // Pre-fill supplier fees from saved Supplier Directory data if available
+    if (selectedSupplier) {
+      const sup = suppliers.find(
+        (s) => (s.id || s.name) === (selectedSupplier.id || selectedSupplier.name)
+      );
+      if (sup) {
+        setPricingRules((prev) => ({
+          ...prev,
+          handling_fee: sup.default_handling_fee || prev.handling_fee,
+          dropship_fee: sup.default_dropship_fee || prev.dropship_fee,
+          misc_fee:     sup.default_misc_fee      || prev.misc_fee,
+        }));
+      }
+    }
     setStep(4);
   }
 
@@ -495,6 +845,16 @@ export default function CatalogPage() {
     setColumnMap({});
     setParseError(null);
     setRestoredNotice(false);
+    setPricingResults(null);
+    setPricingError(null);
+    setPricingRules({
+      marketplace:    "amazon",
+      handling_fee:   "",
+      dropship_fee:   "",
+      misc_fee:       "",
+      min_net_profit: "",
+      warn_map:       true,
+    });
   }
 
   function changeSupplier() {
@@ -502,6 +862,8 @@ export default function CatalogPage() {
     setCsvData(null);
     setColumnMap({});
     setRestoredNotice(false);
+    setPricingResults(null);
+    setPricingError(null);
     // selectedSupplier kept so dropdown pre-selects current value
   }
 
@@ -510,7 +872,67 @@ export default function CatalogPage() {
     // columnMap kept — will be re-merged with auto-match on new upload
   }
 
-  function editMapping() { setStep(3); }
+  function editMapping() {
+    setStep(3);
+    // Clear stale pricing results — they are based on the current mapping
+    setPricingResults(null);
+    setPricingError(null);
+  }
+
+  // ── Pricing estimate (Phase 4C) ─────────────────────────────────────────────
+  // Calls /api/pricing/preview (Next.js proxy) — never calls FastAPI directly.
+  // Calculates for the first 20 preview rows only. Results are never persisted.
+  // No Amazon writes. No repricer. No listings/feeds API calls.
+  async function runPricingPreview() {
+    if (!csvData || previewRows.length === 0) return;
+    setPricingLoading(true);
+    setPricingError(null);
+    setPricingResults(null);
+
+    function cellVal(key, row) {
+      const h = columnMap[key];
+      if (!h) return "";
+      const idx = csvData.headers.indexOf(h);
+      return idx >= 0 ? (row[idx] ?? "").trim() : "";
+    }
+
+    const rows = previewRows.map((row) => ({
+      item_cost:   parseFloat(cellVal("item_cost", row)) || 0,
+      marketplace: pricingRules.marketplace || "amazon",
+      category:    cellVal("category", row) || "default",
+      dims: {
+        weight_lb: parseFloat(cellVal("weight", row))  || 0,
+        length_in: parseFloat(cellVal("length", row))  || 0,
+        width_in:  parseFloat(cellVal("width",  row))  || 0,
+        height_in: parseFloat(cellVal("height", row))  || 0,
+      },
+      supplier_fees: {
+        handling_fee: parseFloat(pricingRules.handling_fee) || 0,
+        dropship_fee: parseFloat(pricingRules.dropship_fee) || 0,
+        misc_fees:    parseFloat(pricingRules.misc_fee) > 0
+                        ? [parseFloat(pricingRules.misc_fee)]
+                        : [],
+      },
+    }));
+
+    try {
+      const res = await fetch("/api/pricing/preview", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ rows }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        setPricingError(data.error || "Pricing estimate failed.");
+      } else {
+        setPricingResults(data.results);
+      }
+    } catch {
+      setPricingError("Could not reach pricing service. Please try again.");
+    } finally {
+      setPricingLoading(false);
+    }
+  }
 
   // ── Derived values ──────────────────────────────────────────────────────────
   const canPreview     = REQUIRED_KEYS.every((k) => columnMap[k]);
@@ -562,7 +984,7 @@ export default function CatalogPage() {
               Catalog Imports
             </div>
             <div style={{ fontSize: 13, color: "var(--ec-text-muted)", marginTop: 3 }}>
-              Upload a supplier CSV and map its columns to catalog fields.
+              Upload a supplier CSV, map its columns, and preview pricing estimates.
             </div>
           </div>
           {step > 1 && (
@@ -836,7 +1258,7 @@ export default function CatalogPage() {
           </StepCard>
         )}
 
-        {/* ══ STEP 4: Preview ═══════════════════════════════════════════════ */}
+        {/* ══ STEP 4: Preview + Pricing Estimate ═══════════════════════════ */}
 
         {step === 4 && csvData && (
           <div style={{ ...cardStyle, padding: "20px 24px" }}>
@@ -883,7 +1305,7 @@ export default function CatalogPage() {
               {" · "}{mappedCount} of {CATALOG_FIELDS.length} fields mapped
             </div>
 
-            {/* Preview table */}
+            {/* ── Mapped columns preview table ──────────────────────────────── */}
             <div style={{ overflowX: "auto", marginBottom: 20 }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                 <thead>
@@ -946,24 +1368,83 @@ export default function CatalogPage() {
               </table>
             </div>
 
-            {/* Actions */}
-            <div style={{ display: "flex", gap: 8 }}>
-              <SecondaryBtn onClick={editMapping}>← Edit Mapping</SecondaryBtn>
-              <SecondaryBtn onClick={startOver}>↺ Start Over</SecondaryBtn>
+            {/* ── Pricing Estimate section ───────────────────────────────────── */}
+            <div style={{
+              borderTop:  "1px solid var(--ec-border)",
+              marginTop:  4,
+              paddingTop: 20,
+            }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ec-text)", marginBottom: 3 }}>
+                Pricing Estimate
+              </div>
+              <div style={{ fontSize: 12, color: "var(--ec-text-muted)", marginBottom: 16, lineHeight: 1.6 }}>
+                Enter fees below, then run a pricing estimate for the first {Math.min(20, totalRows)} rows.
+                The backend calculates a recommended sell price using your configured markup.{" "}
+                <strong>No prices are sent to Amazon.</strong>
+              </div>
+
+              <PricingRulesCard rules={pricingRules} onChange={setPricingRules} />
+
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+                <PrimaryBtn onClick={runPricingPreview} disabled={pricingLoading}>
+                  {pricingLoading ? "Calculating…" : "Run Pricing Estimate →"}
+                </PrimaryBtn>
+                {pricingResults && !pricingLoading && (
+                  <span style={{ fontSize: 12, color: "var(--ec-success-text)", fontWeight: 600 }}>
+                    ✓ Estimate complete for {pricingResults.length} row{pricingResults.length !== 1 ? "s" : ""}
+                  </span>
+                )}
+              </div>
+
+              {/* Pricing error */}
+              {pricingError && (
+                <div style={{
+                  marginBottom: 12,
+                  padding:      "9px 12px",
+                  borderRadius: "var(--ec-radius-xs)",
+                  background:   "var(--ec-danger-bg)",
+                  border:       "1px solid rgba(220,38,38,0.2)",
+                  fontSize:     13,
+                  color:        "var(--ec-danger)",
+                }}>
+                  {pricingError}
+                </div>
+              )}
+
+              {/* Pricing results table */}
+              {pricingResults && (
+                <PricingResultsTable
+                  results={pricingResults}
+                  previewRows={previewRows}
+                  columnMap={columnMap}
+                  headers={csvData.headers}
+                  pricingRules={pricingRules}
+                />
+              )}
+
+              {/* Disclaimer */}
+              <div style={{
+                marginTop:    pricingResults ? 16 : 20,
+                padding:      "10px 14px",
+                borderRadius: "var(--ec-radius-sm)",
+                border:       "1px solid var(--ec-border-light)",
+                background:   "var(--ec-bg)",
+                fontSize:     11,
+                color:        "var(--ec-text-subtle)",
+                lineHeight:   1.6,
+              }}>
+                <strong>Preview only. No prices are sent to Amazon.</strong>{" "}
+                Current calculations use a configured markup estimate and approximate marketplace/shipping fees.
+                Actual Amazon referral fees, shipping costs, account reserves, returns, and per-category fees
+                may differ. Recommended sell price is an estimate only — verify against current market
+                conditions and your actual cost structure before use.
+              </div>
             </div>
 
-            {/* Phase note */}
-            <div style={{
-              marginTop:    16,
-              padding:      "10px 14px",
-              borderRadius: "var(--ec-radius-sm)",
-              border:       "1px solid var(--ec-border-light)",
-              background:   "var(--ec-bg)",
-              fontSize:     12,
-              color:        "var(--ec-text-subtle)",
-              lineHeight:   1.5,
-            }}>
-              Phase 4B — Preview only. Pricing calculation and Amazon pricing rules arrive in Phase 4C.
+            {/* ── Actions ───────────────────────────────────────────────────── */}
+            <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
+              <SecondaryBtn onClick={editMapping}>← Edit Mapping</SecondaryBtn>
+              <SecondaryBtn onClick={startOver}>↺ Start Over</SecondaryBtn>
             </div>
           </div>
         )}
