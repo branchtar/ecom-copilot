@@ -89,8 +89,8 @@ const nav = [
     { label: "eBay",    href: null },
   ]},
   { section: "Suppliers", items: [
-    { label: "Supplier Catalogs",href: null },
-    { label: "Feeds & Imports",  href: null },
+    { label: "Suppliers",        href: "/dashboard/suppliers" },
+    { label: "Catalog Imports",  href: "/dashboard/catalog" },
   ]},
   { section: "Ops", items: [
     { label: "Products",         href: null },
