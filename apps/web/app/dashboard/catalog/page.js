@@ -572,8 +572,14 @@ function PricingRulesCard({ rules, onChange }) {
   );
 }
 
-// ─── Pricing estimate results table (Phase 4C) ───────────────────────────────
+// ─── Pricing estimate results table (Phase 4C + 4D) ─────────────────────────
 function PricingResultsTable({ results, previewRows, columnMap, headers, pricingRules }) {
+  // ── Sort / filter state ────────────────────────────────────────────────────
+  const [sortKey,    setSortKey]    = useState("index");
+  const [sortDir,    setSortDir]    = useState("asc");
+  const [filterWarn, setFilterWarn] = useState("all");
+
+  // ── Formatters ─────────────────────────────────────────────────────────────
   function usd(n) {
     if (n == null || isNaN(n)) return "—";
     return "$" + Number(n).toFixed(2);
@@ -583,44 +589,297 @@ function PricingResultsTable({ results, previewRows, columnMap, headers, pricing
     return Number(n).toFixed(1) + "%";
   }
 
+  // ── Cell extractor (shared by sort, render, and export) ───────────────────
+  function cellVal(row, key) {
+    const h = columnMap[key];
+    if (!h) return "";
+    const idx = headers.indexOf(h);
+    return idx >= 0 ? (row[idx] ?? "").trim() : "";
+  }
+
+  // ── Build enriched row list (zip results + pre-compute warnings) ───────────
+  const allRows = previewRows.map((row, i) => {
+    const result = results[i] ?? null;
+    const w = getPricingRowWarnings(row, result, pricingRules, columnMap, headers);
+    return { row, result, i, w };
+  });
+
+  // ── Summary stats (always over full allRows, unaffected by filter) ─────────
+  const summary = (() => {
+    let totalSell = 0, totalNet = 0, totalRoi = 0;
+    let sellC = 0, netC = 0, roiC = 0, warnRows = 0, dangerRows = 0;
+    for (const { result, w } of allRows) {
+      const sell  = result?.prices?.sell_price ?? null;
+      const total = result?.costs?.total_cost  ?? null;
+      const roi   = result?.roi?.roi_percent   ?? null;
+      const net   = (sell != null && total != null) ? sell - total : null;
+      if (sell != null) { totalSell += sell; sellC++; }
+      if (net  != null) { totalNet  += net;  netC++;  }
+      if (roi  != null) { totalRoi  += roi;  roiC++;  }
+      if (w.length > 0) warnRows++;
+      if (w.some((x) => x.sev === "danger")) dangerRows++;
+    }
+    return {
+      total:      allRows.length,
+      avgSell:    sellC  > 0 ? totalSell / sellC  : null,
+      avgNet:     netC   > 0 ? totalNet  / netC   : null,
+      avgRoi:     roiC   > 0 ? totalRoi  / roiC   : null,
+      warnRows,
+      dangerRows,
+    };
+  })();
+
+  // ── Filter ─────────────────────────────────────────────────────────────────
+  const filteredRows =
+    filterWarn === "all" ? allRows
+    : filterWarn === "any" ? allRows.filter((r) => r.w.length > 0)
+    : allRows.filter((r) => r.w.some((x) => x.label === filterWarn));
+
+  // ── Sort ───────────────────────────────────────────────────────────────────
+  function getSortVal({ row, result, i, w }) {
+    switch (sortKey) {
+      case "index":     return i;
+      case "sku":       return (cellVal(row, "supplier_sku") || "").toLowerCase();
+      case "title":     return (cellVal(row, "title") || "").toLowerCase();
+      case "cost":      return result?.inputs?.item_cost               ?? Infinity;
+      case "shipping":  return result?.components?.calculated_shipping ?? Infinity;
+      case "mktpl":     return result?.components?.marketplace_fee     ?? Infinity;
+      case "total":     return result?.costs?.total_cost               ?? Infinity;
+      case "sell":      return result?.prices?.sell_price              ?? Infinity;
+      case "net": {
+        const s = result?.prices?.sell_price ?? null;
+        const t = result?.costs?.total_cost  ?? null;
+        return (s != null && t != null) ? s - t : Infinity;
+      }
+      case "roi":       return result?.roi?.roi_percent ?? Infinity;
+      case "warncount": return w.length;
+      default:          return i;
+    }
+  }
+
+  const displayRows = [...filteredRows].sort((a, b) => {
+    const av = getSortVal(a), bv = getSortVal(b);
+    if (typeof av === "string") {
+      const cmp = av.localeCompare(bv);
+      return sortDir === "asc" ? cmp : -cmp;
+    }
+    if (av === bv) return 0;
+    if (av === Infinity) return 1;   // nulls always sink to bottom
+    if (bv === Infinity) return -1;
+    return sortDir === "asc" ? av - bv : bv - av;
+  });
+
+  function handleSort(key) {
+    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortKey(key); setSortDir("asc"); }
+  }
+
+  // Returns the sort indicator suffix for a column header
+  function si(key) {
+    if (sortKey !== key) return "";
+    return sortDir === "asc" ? " ▲" : " ▼";
+  }
+
+  // ── CSV export (browser Blob only — no dependencies, no backend) ──────────
+  function handleExportCSV() {
+    function csvCell(v) {
+      if (v == null || v === "") return "";
+      const s = String(v);
+      if (s.includes(",") || s.includes('"') || s.includes("\n"))
+        return '"' + s.replace(/"/g, '""') + '"';
+      return s;
+    }
+
+    const DISCLAIMER =
+      "PREVIEW ONLY — No prices sent to Amazon or any marketplace. " +
+      "All sell prices, fees, and estimates are based on configured markup rates and " +
+      "approximate lookup tables. Actual Amazon referral fees, shipping costs, account " +
+      "reserves, returns, and per-category fees may differ. Verify before use.";
+
+    const headerRow = [
+      "#", "SKU", "Title", "Item Cost", "Shipping Est.",
+      "Mktpl. Fee", "Total Cost", "Sell Price", "Net Profit", "ROI %", "Warnings",
+    ].map(csvCell).join(",");
+
+    const dataRows = displayRows.map(({ row, result, i, w }) => {
+      const sell  = result?.prices?.sell_price              ?? null;
+      const total = result?.costs?.total_cost               ?? null;
+      const ship  = result?.components?.calculated_shipping ?? null;
+      const mktpl = result?.components?.marketplace_fee     ?? null;
+      const cost  = result?.inputs?.item_cost               ?? null;
+      const roi   = result?.roi?.roi_percent                ?? null;
+      const net   = (sell != null && total != null) ? sell - total : null;
+      const fmt   = (n) => (n != null ? Number(n).toFixed(2) : "N/A");
+      return [
+        i + 1,
+        cellVal(row, "supplier_sku"),
+        cellVal(row, "title"),
+        fmt(cost),
+        fmt(ship),
+        fmt(mktpl),
+        fmt(total),
+        fmt(sell),
+        fmt(net),
+        roi != null ? Number(roi).toFixed(1) : "N/A",
+        w.map((x) => x.label).join("; "),
+      ].map(csvCell).join(",");
+    });
+
+    // Footer: blank separator row + full disclaimer
+    const csv = [headerRow, ...dataRows, "", csvCell(DISCLAIMER)].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href     = url;
+    a.download = `pricing-estimate-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // Sortable th base style (spreads existing thStyle, adds pointer + no-select)
+  const sThStyle = { ...thStyle, cursor: "pointer", userSelect: "none" };
+
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div style={{ marginTop: 18 }}>
       <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ec-text)", marginBottom: 10 }}>
         Pricing Estimate Results
       </div>
+
+      {/* ── Summary cards ─────────────────────────────────────────────────── */}
+      <div style={{
+        display:             "grid",
+        gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
+        gap:                 10,
+        marginBottom:        16,
+      }}>
+        {[
+          {
+            label: "Rows Estimated",
+            value: summary.total,
+          },
+          {
+            label: "Avg Sell Price",
+            value: summary.avgSell != null ? usd(summary.avgSell) : "—",
+          },
+          {
+            label: "Avg Net Profit",
+            value: summary.avgNet != null ? usd(summary.avgNet) : "—",
+            color: summary.avgNet != null && summary.avgNet < 0 ? "var(--ec-danger)" : undefined,
+          },
+          {
+            label: "Avg ROI %",
+            value: summary.avgRoi != null ? pct(summary.avgRoi) : "—",
+          },
+          {
+            label: "Rows w/ Warning",
+            value: `${summary.warnRows} / ${summary.total}`,
+            color: summary.warnRows > 0 ? "var(--ec-caution)" : undefined,
+          },
+          {
+            label: "Rows w/ Danger",
+            value: `${summary.dangerRows} / ${summary.total}`,
+            color: summary.dangerRows > 0 ? "var(--ec-danger)" : undefined,
+          },
+        ].map(({ label, value, color }) => (
+          <div key={label} style={{
+            border:       "1px solid var(--ec-border)",
+            borderRadius: "var(--ec-radius-xs)",
+            background:   "var(--ec-bg)",
+            padding:      "10px 12px",
+          }}>
+            <div style={{
+              fontSize:      10,
+              fontWeight:    700,
+              textTransform: "uppercase",
+              letterSpacing: "0.07em",
+              color:         "var(--ec-text-muted)",
+              marginBottom:  4,
+            }}>
+              {label}
+            </div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: color || "var(--ec-text)" }}>
+              {value}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Filter + export controls ───────────────────────────────────────── */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+        <label style={{
+          fontSize:      11,
+          fontWeight:    600,
+          color:         "var(--ec-text-muted)",
+          textTransform: "uppercase",
+          letterSpacing: "0.07em",
+          whiteSpace:    "nowrap",
+        }}>
+          Filter
+        </label>
+        <select
+          value={filterWarn}
+          onChange={(e) => setFilterWarn(e.target.value)}
+          style={{ ...selectStyle, width: "auto", minWidth: 170 }}
+        >
+          <option value="all">All rows</option>
+          <option value="any">Has any warning</option>
+          <option value="Missing SKU">Missing SKU</option>
+          <option value="Missing Cost">Missing Cost</option>
+          <option value="Pricing N/A">Pricing N/A</option>
+          <option value="No Weight">No Weight</option>
+          <option value="No Dimensions">No Dimensions</option>
+          <option value="Check UPC">Check UPC</option>
+          <option value="Below Min Net">Below Min Net</option>
+          <option value="Below MAP">Below MAP</option>
+        </select>
+        <span style={{ fontSize: 12, color: "var(--ec-text-muted)" }}>
+          Showing {displayRows.length} of {allRows.length} rows
+        </span>
+        <button
+          onClick={handleExportCSV}
+          style={{
+            marginLeft:   "auto",
+            padding:      "7px 14px",
+            borderRadius: "var(--ec-radius-sm)",
+            border:       "1px solid var(--ec-border)",
+            background:   "var(--ec-surface)",
+            color:        "var(--ec-text-muted)",
+            fontSize:     12,
+            fontWeight:   600,
+            cursor:       "pointer",
+            whiteSpace:   "nowrap",
+          }}
+        >
+          ⬇ Export CSV
+        </button>
+      </div>
+
+      {/* ── Results table ──────────────────────────────────────────────────── */}
       <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
           <thead>
             <tr>
-              <th style={{ ...thStyle, width: 28 }}>#</th>
-              <th style={thStyle}>SKU</th>
-              <th style={{ ...thStyle, maxWidth: 160 }}>Title</th>
-              <th style={thStyle}>Item Cost</th>
-              <th style={thStyle}>Shipping Est.</th>
-              <th style={thStyle}>Mktpl. Fee †</th>
-              <th style={thStyle}>Total Cost</th>
-              <th style={thStyle}>Sell Price ‡</th>
-              <th style={thStyle}>Net Profit</th>
-              <th style={{ ...thStyle, whiteSpace: "normal", lineHeight: 1.3 }}>ROI % §</th>
-              <th style={thStyle}>Warnings</th>
+              <th style={{ ...sThStyle, width: 28 }}         onClick={() => handleSort("index")}>#{ si("index")}</th>
+              <th style={sThStyle}                            onClick={() => handleSort("sku")}>SKU{si("sku")}</th>
+              <th style={{ ...sThStyle, maxWidth: 160 }}      onClick={() => handleSort("title")}>Title{si("title")}</th>
+              <th style={sThStyle}                            onClick={() => handleSort("cost")}>Item Cost{si("cost")}</th>
+              <th style={sThStyle}                            onClick={() => handleSort("shipping")}>Shipping Est.{si("shipping")}</th>
+              <th style={sThStyle}                            onClick={() => handleSort("mktpl")}>Mktpl. Fee †{si("mktpl")}</th>
+              <th style={sThStyle}                            onClick={() => handleSort("total")}>Total Cost{si("total")}</th>
+              <th style={sThStyle}                            onClick={() => handleSort("sell")}>Sell Price ‡{si("sell")}</th>
+              <th style={sThStyle}                            onClick={() => handleSort("net")}>Net Profit{si("net")}</th>
+              <th style={{ ...sThStyle, whiteSpace: "normal", lineHeight: 1.3 }} onClick={() => handleSort("roi")}>ROI % §{si("roi")}</th>
+              <th style={sThStyle}                            onClick={() => handleSort("warncount")}>Warnings{si("warncount")}</th>
             </tr>
           </thead>
           <tbody>
-            {previewRows.map((row, i) => {
-              const result     = results[i] ?? null;
-              const w          = getPricingRowWarnings(row, result, pricingRules, columnMap, headers);
-              const hasDanger  = w.some((x) => x.sev === "danger");
+            {displayRows.map(({ row, result, i, w }) => {
+              const hasDanger   = w.some((x) => x.sev === "danger");
               const isPricingNA = w.some((x) => x.label === "Pricing N/A");
 
-              function cell(key) {
-                const h = columnMap[key];
-                if (!h) return "";
-                const idx = headers.indexOf(h);
-                return idx >= 0 ? (row[idx] ?? "").trim() : "";
-              }
-
-              const sku   = cell("supplier_sku") || "—";
-              const title = cell("title")         || "—";
+              const sku   = cellVal(row, "supplier_sku") || "—";
+              const title = cellVal(row, "title")         || "—";
               const sell  = result?.prices?.sell_price              ?? null;
               const total = result?.costs?.total_cost               ?? null;
               const ship  = result?.components?.calculated_shipping ?? null;
@@ -676,7 +935,7 @@ function PricingResultsTable({ results, previewRows, columnMap, headers, pricing
                   <td style={{
                     ...tdStyle,
                     fontWeight: 600,
-                    color: isPricingNA      ? "var(--ec-text-subtle)"
+                    color: isPricingNA           ? "var(--ec-text-subtle)"
                          : net != null && net < 0 ? "var(--ec-danger)"
                          : "var(--ec-success-text)",
                   }}>
@@ -696,6 +955,21 @@ function PricingResultsTable({ results, previewRows, columnMap, headers, pricing
                 </tr>
               );
             })}
+            {displayRows.length === 0 && (
+              <tr>
+                <td
+                  colSpan={11}
+                  style={{
+                    ...tdStyle,
+                    textAlign: "center",
+                    padding:   "20px 0",
+                    color:     "var(--ec-text-subtle)",
+                  }}
+                >
+                  No rows match the current filter.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
