@@ -727,7 +727,7 @@ function PricingResultsTable({ results, previewRows, columnMap, headers, pricing
 
     // Footer: blank separator row + full disclaimer
     const csv = [headerRow, ...dataRows, "", csvCell(DISCLAIMER)].join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" }); // UTF-8 BOM — required for Excel to detect encoding correctly
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement("a");
     a.href     = url;
@@ -1565,11 +1565,11 @@ export default function CatalogPage() {
                 fontSize:     12,
                 color:        "var(--ec-caution)",
               }}>
-                {warnSummary.cost   > 0 && <span>⚠ {warnSummary.cost.toLocaleString()}   rows missing or invalid cost</span>}
+                {warnSummary.cost   > 0 && <span>⚠ {warnSummary.cost.toLocaleString()}   of {totalRows.toLocaleString()} rows missing or invalid cost</span>}
                 {warnSummary.cost   > 0 && warnSummary.sku    > 0 && <span style={{ opacity: 0.4 }}>·</span>}
-                {warnSummary.sku    > 0 && <span>⚠ {warnSummary.sku.toLocaleString()}    rows missing SKU</span>}
+                {warnSummary.sku    > 0 && <span>⚠ {warnSummary.sku.toLocaleString()}    of {totalRows.toLocaleString()} rows missing SKU</span>}
                 {warnSummary.sku    > 0 && warnSummary.weight > 0 && <span style={{ opacity: 0.4 }}>·</span>}
-                {warnSummary.weight > 0 && <span>⚠ {warnSummary.weight.toLocaleString()} rows missing weight</span>}
+                {warnSummary.weight > 0 && <span>⚠ {warnSummary.weight.toLocaleString()} of {totalRows.toLocaleString()} rows missing weight</span>}
               </div>
             )}
 
