@@ -1106,6 +1106,87 @@ async def update_marketplace_ref(request: Request):
         "tenant_ref": tenant_ref,
     })
 
+
+@app.patch("/api/workspaces/suppliers")
+async def update_workspace_suppliers(request: Request):
+    """
+    Phase 4E: Replace the supplier directory for a specific workspace.
+
+    Body: { "workspace_id": "<id>", "suppliers": [ {...}, ... ] }
+
+    Finds the workspace by workspace_id (NOT the active one — the client sends
+    the id explicitly) and replaces only that workspace's suppliers list, so
+    suppliers never mix across workspaces. Returns the full updated profile.
+
+    Suppliers are sanitized server-side (field whitelist, length + count caps).
+    """
+    # 1. Internal-key guard — constant-time compare, same as other workspace endpoints.
+    provided_key = (request.headers.get("x-ecom-internal-key") or "")
+    expected_key = (os.getenv("ECOM_INTERNAL_API_KEY") or "")
+    if not expected_key:
+        return JSONResponse({"ok": False, "error": "Workspaces endpoint not configured"}, status_code=503)
+    if not hmac.compare_digest(provided_key, expected_key):
+        logger.warning("update_workspace_suppliers: invalid internal key")
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+
+    # 2. User sub — required; identifies which profile to update. Never logged.
+    user_sub = (request.headers.get("x-ecom-user-sub") or "").strip()
+    if not user_sub:
+        return JSONResponse({"ok": False, "error": "Missing X-Ecom-User-Sub"}, status_code=400)
+
+    # 3. Parse and validate body.
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "Invalid JSON body"}, status_code=400)
+
+    workspace_id = (body.get("workspace_id") or "").strip()
+    if not workspace_id:
+        return JSONResponse({"ok": False, "error": "workspace_id required"}, status_code=400)
+
+    try:
+        suppliers = _workspace.sanitize_suppliers(body.get("suppliers"))
+    except _workspace.WorkspaceStoreError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+
+    # 4. Load the user's workspace profile. Idempotent — auto-creates if missing.
+    try:
+        store = _workspace.get_workspace_store()
+        profile = store.get_or_create_profile(user_sub=user_sub, email="")
+    except _workspace.MissingConfigError as exc:
+        logger.error("update_workspace_suppliers config error: %s", exc)
+        return JSONResponse({"ok": False, "error": "Server configuration error"}, status_code=500)
+    except _workspace.WorkspaceStorageError as exc:
+        logger.error("update_workspace_suppliers storage error: %s", exc)
+        return JSONResponse({"ok": False, "error": "Could not load workspace profile"}, status_code=500)
+
+    # 5. Find the target workspace by id (explicit — never the active fallback).
+    target = next(
+        (ws for ws in profile.get("workspaces", []) if ws.get("id") == workspace_id),
+        None,
+    )
+    if target is None:
+        return JSONResponse({"ok": False, "error": "Unknown workspace_id"}, status_code=404)
+
+    # 6. Replace only this workspace's suppliers list — no cross-workspace mixing.
+    target["suppliers"] = suppliers
+
+    # 7. Persist the updated profile.
+    try:
+        store.save_profile(user_sub=user_sub, profile=profile)
+    except _workspace.WorkspaceStorageError as exc:
+        logger.error(
+            "update_workspace_suppliers save error (sub=%s workspace=%s): %s",
+            user_sub, workspace_id, exc,
+        )
+        return JSONResponse({"ok": False, "error": "Could not save workspace profile"}, status_code=500)
+
+    logger.info(
+        "update_workspace_suppliers: saved %d supplier(s) (sub=%s workspace=%s)",
+        len(suppliers), user_sub, workspace_id,
+    )
+    return JSONResponse({"ok": True, "profile": profile})
+
 # === EC_WORKSPACES_END ===
 
 

@@ -64,6 +64,9 @@ def _make_default_profile(user_sub: str, email: str) -> dict:
                     "amazon": "dev",
                     "shopify": "dev",
                 },
+                # Phase 4E: per-workspace supplier directory. Empty by default.
+                # Existing profiles without this key are treated as [] on read.
+                "suppliers": [],
             }
         ],
         "active_workspace_id": _DEFAULT_WORKSPACE_ID,
@@ -134,6 +137,68 @@ def slugify_workspace_name(name: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", slug)
     slug = slug.strip("-")[:40]
     return slug or "workspace"
+
+
+# ---------------------------------------------------------------------------
+# Supplier directory (Phase 4E)
+# ---------------------------------------------------------------------------
+
+# Maximum suppliers persisted per workspace. Profiles live in a single
+# Secrets Manager blob (64KB limit); this cap keeps the blob well within bounds.
+_MAX_SUPPLIERS = 1000
+
+# Allowed scalar supplier fields. Anything outside this set is dropped so the
+# client cannot inject arbitrary data into the profile blob.
+_SUPPLIER_STR_FIELDS = (
+    "name", "type", "status", "website", "email", "phone",
+    "contact_rep_name", "contact_rep_email",
+    "default_handling_fee", "default_dropship_fee", "default_misc_fee",
+    "default_return_window_days", "notes",
+)
+_ADDRESS_FIELDS = ("line1", "city", "state", "zip", "country")
+_MAX_FIELD_LEN = 500
+
+
+def _clean_str(value, *, limit: int = _MAX_FIELD_LEN) -> str:
+    if value is None:
+        return ""
+    return str(value)[:limit]
+
+
+def _clean_address(raw) -> dict:
+    src = raw if isinstance(raw, dict) else {}
+    return {k: _clean_str(src.get(k)) for k in _ADDRESS_FIELDS}
+
+
+def sanitize_suppliers(raw) -> list:
+    """
+    Normalize a client-supplied supplier list before persisting it.
+
+    * Drops anything that is not a dict.
+    * Keeps only known fields (whitelist) — no arbitrary keys.
+    * Coerces scalars to length-bounded strings; normalizes nested addresses.
+    * Preserves the client id (sup_<base36>); synthesizes a stable one if absent.
+    * Caps the list at _MAX_SUPPLIERS.
+
+    Raises WorkspaceStoreError if the input is not a list.
+    """
+    if not isinstance(raw, list):
+        raise WorkspaceStoreError("suppliers must be a list")
+
+    cleaned = []
+    for i, item in enumerate(raw[:_MAX_SUPPLIERS]):
+        if not isinstance(item, dict):
+            continue
+        sup = {}
+        sup_id = _clean_str(item.get("id"), limit=80).strip()
+        sup["id"] = sup_id or f"sup_{i}"
+        for field in _SUPPLIER_STR_FIELDS:
+            sup[field] = _clean_str(item.get(field))
+        sup["location"] = _clean_address(item.get("location"))
+        sup["return_same_as_location"] = bool(item.get("return_same_as_location"))
+        sup["return_address"] = _clean_address(item.get("return_address"))
+        cleaned.append(sup)
+    return cleaned
 
 
 # ---------------------------------------------------------------------------
