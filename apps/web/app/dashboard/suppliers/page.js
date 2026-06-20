@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useWorkspace } from "../../../lib/useWorkspace";
 import Sidebar from "../../../components/ui/Sidebar";
 import Topbar from "../../../components/ui/Topbar";
@@ -490,22 +490,67 @@ function SupplierRow({ supplier, onEdit, onDelete }) {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function SuppliersPage() {
-  const { workspace, profile, saving, createWorkspace, setActiveWorkspace } = useWorkspace();
+  // Backend (workspace profile) is the source of truth for suppliers.
+  const {
+    workspace, profile, loading, saving,
+    createWorkspace, setActiveWorkspace,
+    suppliers, saveSuppliers,
+  } = useWorkspace();
 
-  const [suppliers,  setSuppliers]  = useState([]);
   const [showForm,   setShowForm]   = useState(false);
   const [editingId,  setEditingId]  = useState(null);
   const [form,       setForm]       = useState(() => cloneForm(EMPTY_FORM));
   const [formError,  setFormError]  = useState(null);
 
-  // Hydrate from localStorage after mount (avoids SSR mismatch)
-  useEffect(() => {
-    setSuppliers(loadSuppliers());
-  }, []);
+  const workspaceId  = profile?.active_workspace_id ?? null;
+  const migrationRef = useRef(false);
 
-  function updateSuppliers(next) {
-    setSuppliers(next);
-    persistSuppliers(next);
+  // ── One-time localStorage → backend migration ──────────────────────────────
+  // Runs only when the server supplier list for THIS workspace is empty and the
+  // browser still holds legacy ec_suppliers_v1 records. A per-workspace flag
+  // (ec_suppliers_migrated_v1:<workspaceId>) plus the empty-list guard prevent
+  // any duplicate import.
+  useEffect(() => {
+    if (loading || !workspaceId) return;     // wait for profile to load
+    if (migrationRef.current) return;         // already handled this session
+    if (suppliers.length > 0) return;         // server already has data → never import
+
+    const flagKey = `ec_suppliers_migrated_v1:${workspaceId}`;
+    try {
+      if (localStorage.getItem(flagKey) === "1") {
+        migrationRef.current = true;
+        return;
+      }
+    } catch { /* localStorage unavailable (e.g. private mode) — skip migration */ return; }
+
+    const legacy = loadSuppliers();           // reads ec_suppliers_v1
+    if (!Array.isArray(legacy) || legacy.length === 0) {
+      try { localStorage.setItem(flagKey, "1"); } catch {}
+      migrationRef.current = true;
+      return;
+    }
+
+    migrationRef.current = true;              // claim before async to avoid re-entry
+    (async () => {
+      const res = await saveSuppliers(legacy);
+      if (res.ok) {
+        try { localStorage.setItem(flagKey, "1"); } catch {}
+      } else {
+        migrationRef.current = false;         // allow retry on a later mount
+      }
+    })();
+  }, [loading, workspaceId, suppliers.length, saveSuppliers]);
+
+  // ── Persist helper ─────────────────────────────────────────────────────────
+  // Saves the full list to the backend (source of truth). On success, mirrors
+  // to localStorage as a cache so the catalog dropdown fallback stays fresh.
+  async function commit(next) {
+    setFormError(null);
+    const res = await saveSuppliers(next);
+    if (res.ok) {
+      try { persistSuppliers(next); } catch {}
+    }
+    return res;
   }
 
   function openAdd() {
@@ -535,24 +580,30 @@ export default function SuppliersPage() {
     setFormError(null);
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (!form.name.trim()) {
       setFormError("Supplier name is required.");
       return;
     }
-    setFormError(null);
-    if (editingId) {
-      updateSuppliers(suppliers.map((s) => (s.id === editingId ? { ...form, id: editingId } : s)));
-    } else {
-      updateSuppliers([...suppliers, { ...form, id: makeId() }]);
+    const next = editingId
+      ? suppliers.map((s) => (s.id === editingId ? { ...form, id: editingId } : s))
+      : [...suppliers, { ...form, id: makeId() }];
+
+    const res = await commit(next);
+    if (!res.ok) {
+      setFormError(res.error || "Could not save supplier. Please try again.");
+      return;
     }
     setShowForm(false);
     setEditingId(null);
   }
 
-  function handleDelete(id) {
+  async function handleDelete(id) {
     if (editingId === id) handleCancel();
-    updateSuppliers(suppliers.filter((s) => s.id !== id));
+    const res = await commit(suppliers.filter((s) => s.id !== id));
+    if (!res.ok) {
+      setFormError(res.error || "Could not delete supplier. Please try again.");
+    }
   }
 
   function handleFieldChange(key, value) {

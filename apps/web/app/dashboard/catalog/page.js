@@ -984,7 +984,11 @@ function PricingResultsTable({ results, previewRows, columnMap, headers, pricing
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function CatalogPage() {
-  const { workspace, profile, saving, createWorkspace, setActiveWorkspace } = useWorkspace();
+  const {
+    workspace, profile, loading: wsLoading, saving,
+    createWorkspace, setActiveWorkspace,
+    suppliers: wsSuppliers,
+  } = useWorkspace();
   const fileInputRef = useRef(null);
 
   // ── Wizard state ────────────────────────────────────────────────────────────
@@ -1011,8 +1015,17 @@ export default function CatalogPage() {
   const [pricingLoading, setPricingLoading] = useState(false);
   const [pricingError,   setPricingError]   = useState(null);
 
-  // Hydrate supplier list from Supplier Directory (read-only)
-  useEffect(() => { setSuppliers(loadSavedSuppliers()); }, []);
+  // Hydrate supplier list from the active workspace profile (source of truth).
+  // Falls back to the localStorage cache only when the workspace profile is
+  // unavailable (e.g. profile fetch failed) — never to override a loaded list.
+  useEffect(() => {
+    if (wsLoading) return;
+    if (workspace) {
+      setSuppliers(Array.isArray(wsSuppliers) ? wsSuppliers : []);
+    } else {
+      setSuppliers(loadSavedSuppliers());
+    }
+  }, [wsLoading, workspace, wsSuppliers]);
 
   // ── Step 1: Confirm supplier ────────────────────────────────────────────────
   function handleSupplierContinue() {

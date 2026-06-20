@@ -16,6 +16,11 @@ import { useCallback, useEffect, useState } from "react";
  *                        POSTs new workspace; updates profile from response (no second round-trip).
  *   setActiveWorkspace — async (workspaceId: string) → { ok, error? }
  *                        PATCHes active workspace; optimistic update with rollback on error.
+ *   suppliers          — active workspace's supplier directory array (Phase 4E),
+ *                        or [] while loading / on error.
+ *   saveSuppliers      — async (list: Array) → { ok, error? }
+ *                        PATCHes the active workspace's suppliers; optimistic update
+ *                        with rollback on error. Backend is the source of truth.
  *
  * Fallback contract:
  *   Callers must use  workspace?.marketplace_tenant_refs?.amazon ?? <fallback>
@@ -108,11 +113,70 @@ export function useWorkspace() {
     }
   }, [profile]); // profile in deps so rollback snapshot is always current
 
+  // ── saveSuppliers ─────────────────────────────────────────────────────────
+  // Replaces the active workspace's supplier list. Optimistically updates local
+  // state, then persists via PATCH. Rolls back to previous profile on any error.
+  // Backend remains the source of truth — the response profile is applied.
+
+  const saveSuppliers = useCallback(async (list) => {
+    if (!profile) return { ok: false, error: "No profile loaded" };
+    const workspaceId = profile.active_workspace_id;
+    if (!workspaceId) return { ok: false, error: "No active workspace" };
+
+    const next = Array.isArray(list) ? list : [];
+
+    // Optimistic update — capture snapshot for rollback.
+    const previous = profile;
+    setProfile((p) =>
+      p
+        ? {
+            ...p,
+            workspaces: (p.workspaces ?? []).map((w) =>
+              w.id === workspaceId ? { ...w, suppliers: next } : w
+            ),
+          }
+        : p
+    );
+    setSaving(true);
+
+    try {
+      const resp = await fetch("/api/workspaces/suppliers", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspace_id: workspaceId, suppliers: next }),
+        cache: "no-store",
+      });
+      const data = await resp.json();
+      if (!data.ok) throw new Error(data.error || "Failed to save suppliers");
+      // Server returns the full updated profile — apply directly (source of truth).
+      if (data.profile) setProfile(data.profile);
+      return { ok: true };
+    } catch (err) {
+      // Rollback optimistic update.
+      setProfile(previous);
+      return { ok: false, error: err.message || "Failed to save suppliers" };
+    } finally {
+      setSaving(false);
+    }
+  }, [profile]); // profile in deps so rollback snapshot is always current
+
   // ── Derive active workspace ───────────────────────────────────────────────
 
   const workspace = profile
     ? (profile.workspaces ?? []).find((w) => w.id === profile.active_workspace_id) ?? null
     : null;
 
-  return { workspace, profile, loading, error, saving, createWorkspace, setActiveWorkspace };
+  const suppliers = workspace?.suppliers ?? [];
+
+  return {
+    workspace,
+    profile,
+    loading,
+    error,
+    saving,
+    createWorkspace,
+    setActiveWorkspace,
+    suppliers,
+    saveSuppliers,
+  };
 }
