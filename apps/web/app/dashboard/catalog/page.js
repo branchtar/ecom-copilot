@@ -156,7 +156,40 @@ function getRowWarnings(rowArr, headers, colMap) {
 
 // ─── Pricing estimate row warnings (Phase 4C) ────────────────────────────────
 // Separate from getRowWarnings — adds pricing-specific checks against engine results.
-function getPricingRowWarnings(row, result, rules, colMap, headers) {
+// ─── Min Net Profit floor (Phase 4F) ──────────────────────────────────────────
+// Pure, side-effect-free. Raises the recommended sell price so that
+//   Recommended Sell − Total Cost >= Min Net Profit
+// using only values the backend already returns. This is preview/estimate only —
+// nothing is sent to Amazon or any marketplace.
+//
+//   Minimum Required Sell Price = Total Cost + Min Net Profit
+//   Recommended Sell Price      = max(normalCalculatedSellPrice, Minimum Required)
+//
+// When the price is raised it is rounded UP to whole cents, so the adjusted net
+// profit is guaranteed to be at least Min Net Profit (e.g. 13.20 + 5.00 → 18.20).
+// Returns null when there is no usable engine result (e.g. Pricing N/A rows), in
+// which case callers fall back to their existing "—"/"N/A" handling.
+function applyMinNetFloor(result, rules) {
+  const normalSell = result?.prices?.sell_price ?? null;
+  const totalCost  = result?.costs?.total_cost  ?? null;
+  if (normalSell == null || totalCost == null) return null;
+
+  const roiCost = result?.costs?.roi_cost ?? null;
+  const minNet  = parseFloat(rules?.min_net_profit) || 0;
+
+  const minRequired = totalCost + minNet;
+  const raised      = minNet > 0 && normalSell < minRequired;
+  // Ceil to cents when raised → net profit is guaranteed >= minNet.
+  const sellPrice   = raised ? Math.ceil(minRequired * 100) / 100 : normalSell;
+  const net         = sellPrice - totalCost;
+  const roiPercent  = (roiCost != null && roiCost > 0)
+    ? ((sellPrice - roiCost) / roiCost) * 100
+    : (result?.roi?.roi_percent ?? null);
+
+  return { normalSell, sellPrice, totalCost, net, roiPercent, raised, minNet };
+}
+
+function getPricingRowWarnings(row, result, rules, colMap, headers, adj) {
   function cell(key) {
     const h = colMap[key];
     if (!h) return "";
@@ -199,15 +232,16 @@ function getPricingRowWarnings(row, result, rules, colMap, headers) {
     warnings.push({ label: "Check UPC", sev: "caution" });
   }
 
-  // Price-based warnings (require a valid engine result)
+  // Price-based warnings (require a valid engine result).
+  // Uses the Min Net Profit-adjusted sell price (Phase 4F) so MAP checks and the
+  // floor indicator reflect the recommended price actually shown to the user.
   if (result && result.prices) {
-    const sell   = result.prices.sell_price  ?? 0;
-    const total  = result.costs?.total_cost  ?? 0;
-    const net    = sell - total;
-    const minNet = parseFloat(rules.min_net_profit) || 0;
+    const sell = adj ? adj.sellPrice : (result.prices.sell_price ?? 0);
 
-    if (minNet > 0 && net < minNet) {
-      warnings.push({ label: "Below Min Net", sev: "danger" });
+    // Floor enforced: when the price was raised to meet Min Net Profit, surface
+    // an informational chip instead of the old "Below Min Net" danger warning.
+    if (adj && adj.raised) {
+      warnings.push({ label: "Raised to Min Net", sev: "caution" });
     }
 
     if (rules.warn_map && colMap.map_price && mapRaw) {
@@ -534,7 +568,8 @@ function PricingRulesCard({ rules, onChange }) {
         />
       </div>
 
-      {/* Min Net Profit threshold — warning only, not enforced by engine */}
+      {/* Min Net Profit floor (Phase 4F) — raises the recommended sell price so
+          net profit >= this value. Preview/estimate only; no prices sent to Amazon. */}
       <div>
         <label style={labelSt}>Min Net Profit ($)</label>
         <input
@@ -597,22 +632,24 @@ function PricingResultsTable({ results, previewRows, columnMap, headers, pricing
     return idx >= 0 ? (row[idx] ?? "").trim() : "";
   }
 
-  // ── Build enriched row list (zip results + pre-compute warnings) ───────────
+  // ── Build enriched row list (zip results + Min Net floor + warnings) ───────
+  // adj holds the Phase 4F Min Net Profit-adjusted sell/net/roi and is the single
+  // source of adjusted math for summary, sorting, render, and CSV export.
   const allRows = previewRows.map((row, i) => {
     const result = results[i] ?? null;
-    const w = getPricingRowWarnings(row, result, pricingRules, columnMap, headers);
-    return { row, result, i, w };
+    const adj = applyMinNetFloor(result, pricingRules);
+    const w = getPricingRowWarnings(row, result, pricingRules, columnMap, headers, adj);
+    return { row, result, i, w, adj };
   });
 
   // ── Summary stats (always over full allRows, unaffected by filter) ─────────
   const summary = (() => {
     let totalSell = 0, totalNet = 0, totalRoi = 0;
     let sellC = 0, netC = 0, roiC = 0, warnRows = 0, dangerRows = 0;
-    for (const { result, w } of allRows) {
-      const sell  = result?.prices?.sell_price ?? null;
-      const total = result?.costs?.total_cost  ?? null;
-      const roi   = result?.roi?.roi_percent   ?? null;
-      const net   = (sell != null && total != null) ? sell - total : null;
+    for (const { adj, w } of allRows) {
+      const sell  = adj?.sellPrice  ?? null;
+      const roi   = adj?.roiPercent ?? null;
+      const net   = adj?.net        ?? null;
       if (sell != null) { totalSell += sell; sellC++; }
       if (net  != null) { totalNet  += net;  netC++;  }
       if (roi  != null) { totalRoi  += roi;  roiC++;  }
@@ -636,7 +673,7 @@ function PricingResultsTable({ results, previewRows, columnMap, headers, pricing
     : allRows.filter((r) => r.w.some((x) => x.label === filterWarn));
 
   // ── Sort ───────────────────────────────────────────────────────────────────
-  function getSortVal({ row, result, i, w }) {
+  function getSortVal({ row, result, i, w, adj }) {
     switch (sortKey) {
       case "index":     return i;
       case "sku":       return (cellVal(row, "supplier_sku") || "").toLowerCase();
@@ -645,13 +682,9 @@ function PricingResultsTable({ results, previewRows, columnMap, headers, pricing
       case "shipping":  return result?.components?.calculated_shipping ?? Infinity;
       case "mktpl":     return result?.components?.marketplace_fee     ?? Infinity;
       case "total":     return result?.costs?.total_cost               ?? Infinity;
-      case "sell":      return result?.prices?.sell_price              ?? Infinity;
-      case "net": {
-        const s = result?.prices?.sell_price ?? null;
-        const t = result?.costs?.total_cost  ?? null;
-        return (s != null && t != null) ? s - t : Infinity;
-      }
-      case "roi":       return result?.roi?.roi_percent ?? Infinity;
+      case "sell":      return adj?.sellPrice  ?? Infinity;   // Min Net-adjusted
+      case "net":       return adj?.net        ?? Infinity;   // Min Net-adjusted
+      case "roi":       return adj?.roiPercent ?? Infinity;   // Min Net-adjusted
       case "warncount": return w.length;
       default:          return i;
     }
@@ -701,14 +734,15 @@ function PricingResultsTable({ results, previewRows, columnMap, headers, pricing
       "Mktpl. Fee", "Total Cost", "Sell Price", "Net Profit", "ROI %", "Warnings",
     ].map(csvCell).join(",");
 
-    const dataRows = displayRows.map(({ row, result, i, w }) => {
-      const sell  = result?.prices?.sell_price              ?? null;
+    const dataRows = displayRows.map(({ row, result, i, w, adj }) => {
+      // Min Net Profit-adjusted sell / net / roi (Phase 4F); other columns raw.
+      const sell  = adj?.sellPrice                          ?? null;
       const total = result?.costs?.total_cost               ?? null;
       const ship  = result?.components?.calculated_shipping ?? null;
       const mktpl = result?.components?.marketplace_fee     ?? null;
       const cost  = result?.inputs?.item_cost               ?? null;
-      const roi   = result?.roi?.roi_percent                ?? null;
-      const net   = (sell != null && total != null) ? sell - total : null;
+      const roi   = adj?.roiPercent                         ?? null;
+      const net   = adj?.net                                ?? null;
       const fmt   = (n) => (n != null ? Number(n).toFixed(2) : "N/A");
       return [
         i + 1,
@@ -830,7 +864,7 @@ function PricingResultsTable({ results, previewRows, columnMap, headers, pricing
           <option value="No Weight">No Weight</option>
           <option value="No Dimensions">No Dimensions</option>
           <option value="Check UPC">Check UPC</option>
-          <option value="Below Min Net">Below Min Net</option>
+          <option value="Raised to Min Net">Raised to Min Net</option>
           <option value="Below MAP">Below MAP</option>
         </select>
         <span style={{ fontSize: 12, color: "var(--ec-text-muted)" }}>
@@ -874,19 +908,20 @@ function PricingResultsTable({ results, previewRows, columnMap, headers, pricing
             </tr>
           </thead>
           <tbody>
-            {displayRows.map(({ row, result, i, w }) => {
+            {displayRows.map(({ row, result, i, w, adj }) => {
               const hasDanger   = w.some((x) => x.sev === "danger");
               const isPricingNA = w.some((x) => x.label === "Pricing N/A");
 
               const sku   = cellVal(row, "supplier_sku") || "—";
               const title = cellVal(row, "title")         || "—";
-              const sell  = result?.prices?.sell_price              ?? null;
+              // Min Net Profit-adjusted sell / net / roi (Phase 4F); other columns raw.
+              const sell  = adj?.sellPrice                          ?? null;
               const total = result?.costs?.total_cost               ?? null;
               const ship  = result?.components?.calculated_shipping ?? null;
               const mktpl = result?.components?.marketplace_fee     ?? null;
               const cost  = result?.inputs?.item_cost               ?? null;
-              const roi   = result?.roi?.roi_percent                ?? null;
-              const net   = (sell != null && total != null) ? sell - total : null;
+              const roi   = adj?.roiPercent                         ?? null;
+              const net   = adj?.net                                ?? null;
 
               const na = <span style={{ color: "var(--ec-text-subtle)" }}>—</span>;
 
@@ -928,7 +963,19 @@ function PricingResultsTable({ results, previewRows, columnMap, headers, pricing
                   <td style={{ ...tdStyle, fontWeight: 600 }}>
                     {isPricingNA
                       ? <span style={{ color: "var(--ec-text-subtle)" }}>N/A</span>
-                      : usd(sell)
+                      : (
+                        <span>
+                          {usd(sell)}
+                          {adj?.raised && (
+                            <span
+                              title={`Raised to meet Min Net Profit (was ${usd(adj.normalSell)})`}
+                              style={{ color: "var(--ec-warning-text, #b45309)", marginLeft: 4, fontSize: 11 }}
+                            >
+                              ↑
+                            </span>
+                          )}
+                        </span>
+                      )
                     }
                   </td>
 
@@ -975,7 +1022,7 @@ function PricingResultsTable({ results, previewRows, columnMap, headers, pricing
       </div>
       <div style={{ fontSize: 10, color: "var(--ec-text-subtle)", marginTop: 6, lineHeight: 1.6 }}>
         † Amazon fee estimate only — actual Amazon referral fees are category-based and may differ significantly.{" "}
-        ‡ Recommended price estimate based on configured markup — verify before use.{" "}
+        ‡ Recommended price estimate based on configured markup, raised when needed to meet Min Net Profit (↑) — preview only, no prices sent to Amazon.{" "}
         § ROI % excludes marketplace fee (engine design). Net Profit = Sell Price − Total Cost.
       </div>
     </div>
