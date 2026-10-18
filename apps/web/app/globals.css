@@ -2,8 +2,26 @@
    -----------------------------------------------
    CSS custom properties consumed throughout the dashboard
    via inline style={{ color: "var(--ec-...)" }}
-   No framework required — just load this in layout.js.
+   Loaded in layout.js.
+
+   Tailwind is imported WITHOUT Preflight (its global reset) on purpose.
+   Most of this app — the homepage, /features, /pricing, /contact, /scanner
+   and the whole dashboard — is styled with inline style={{ }} and relies on
+   browser default rendering for bare <h2> and <p> tags. Preflight zeroes
+   heading sizes and paragraph margins, which would visibly flatten those
+   pages. The utility classes used by /privacy, /terms, /support, /docs and
+   /data-deletion do not need Preflight to render correctly.
+
+   If a future page needs a full reset, scope one to that page rather than
+   enabling Preflight globally.
 */
+
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+@source "../app";
+@source "../components";
 
 *, *::before, *::after {
   box-sizing: border-box;
