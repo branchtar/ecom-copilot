@@ -598,6 +598,7 @@ export default function Page() {
           <a href="/pricing"  style={{ textDecoration: "none", color: "inherit" }}>Pricing</a>
           <a href="/privacy"  style={{ textDecoration: "none", color: "inherit" }}>Privacy Policy</a>
           <a href="/terms"    style={{ textDecoration: "none", color: "inherit" }}>Terms of Service</a>
+          <a href="/data-deletion" style={{ textDecoration: "none", color: "inherit" }}>Data Deletion</a>
           <a href="/contact"  style={{ textDecoration: "none", color: "inherit" }}>Contact</a>
         </div>
         <div style={{ color: "#6b7280" }}>© 2026 Ecom Navigation. All rights reserved.</div>
